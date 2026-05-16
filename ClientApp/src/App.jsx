@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 
-const API_STATE_URL = "/api/state";
-const API_PRESENCE_URL = "/api/presence";
-const API_AUTH_URL = "/api/auth/login";
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
+const API_STATE_URL = `${API_BASE_URL}/api/state`;
+const API_PRESENCE_URL = `${API_BASE_URL}/api/presence`;
+const API_AUTH_URL = `${API_BASE_URL}/api/auth/login`;
 
 export default function App() {
   const [ready, setReady] = useState(false);
