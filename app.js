@@ -94,6 +94,7 @@ function createCategoryState(overrides = {}) {
     teamCount: MAX_TEAMS,
     weekLimit: MAX_WEEKS,
     startDate: "",
+    lastAutoWeek: null,
     paymentDefaultsVersion: PAYMENT_DEFAULTS_VERSION,
     finalDonation: 0,
     finalWeekFee: DEFAULT_FINAL_WEEK_FEE_DOP,
@@ -139,6 +140,7 @@ function normalizeCategoryState(saved = {}) {
     teamCount: clamp(Number(saved.teamCount) || MAX_TEAMS, MIN_TEAMS, MAX_TEAMS),
     weekLimit: clamp(Number(saved.weekLimit) || MAX_WEEKS, 1, MAX_WEEKS),
     startDate: normalizeDateInput(saved.startDate),
+    lastAutoWeek: normalizeAutoWeek(saved.lastAutoWeek),
     paymentDefaultsVersion: PAYMENT_DEFAULTS_VERSION,
     finalDonation: Math.max(0, Number(saved.finalDonation) || 0),
     finalWeekFee: Math.max(0, Number(saved.finalWeekFee) || DEFAULT_FINAL_WEEK_FEE_DOP),
@@ -165,6 +167,11 @@ function normalizeHiddenWeeks(savedWeeks) {
 function normalizeDateInput(value) {
   const normalized = String(value ?? "").trim();
   return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : "";
+}
+
+function normalizeAutoWeek(value) {
+  const week = Number(value);
+  return Number.isInteger(week) && week >= 1 && week <= MAX_WEEKS ? week : null;
 }
 
 function normalizeScores(savedScores) {
@@ -604,11 +611,16 @@ function autoWeekFromStartDate() {
   return clamp(Math.floor(Math.max(0, elapsedDays) / 7) + 1, 1, state.weekLimit);
 }
 
-function applyAutoWeekFromStartDate() {
+function applyAutoWeekFromStartDate({ force = false } = {}) {
   const autoWeek = autoWeekFromStartDate();
-  if (!autoWeek || autoWeek === activeWeek) return false;
+  if (!autoWeek) {
+    state.lastAutoWeek = null;
+    return false;
+  }
+  if (!force && state.lastAutoWeek === autoWeek) return false;
   activeWeek = autoWeek;
   state.activeWeek = activeWeek;
+  state.lastAutoWeek = autoWeek;
   return true;
 }
 
@@ -1783,7 +1795,8 @@ function handleWeekLimitChange() {
 function handleStartDateChange() {
   if (!requireAdmin()) return;
   state.startDate = normalizeDateInput(els.startDateInput.value);
-  applyAutoWeekFromStartDate();
+  state.lastAutoWeek = null;
+  applyAutoWeekFromStartDate({ force: true });
   render();
 }
 
