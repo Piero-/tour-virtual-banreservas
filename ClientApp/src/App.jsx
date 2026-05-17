@@ -40,7 +40,7 @@ export default function App() {
     booted.current = true;
 
     const script = document.createElement("script");
-    script.src = "/legacy-app.js";
+    script.src = "/legacy-app.js?v=20260517-no-autodownload";
     script.async = false;
     document.body.appendChild(script);
   }, [ready]);
@@ -123,6 +123,10 @@ export default function App() {
           <label className="field">
             <span>Semana activa</span>
             <select id="weekSelect"></select>
+          </label>
+          <label className="field compact admin-only">
+            <span>Fecha de inicio</span>
+            <input id="startDateInput" type="date" />
           </label>
           <label className="switch">
             <input id="doubleToggle" type="checkbox" />
@@ -207,7 +211,7 @@ export default function App() {
           <div id="reportExport" className="report-export" hidden>
             <div>
               <strong id="reportExportStatus">Imagen del reporte lista</strong>
-              <span>Usa el enlace de guardar si tu navegador bloquea la descarga automática.</span>
+              <span>Revisa la vista previa y guarda la imagen cuando esté lista.</span>
             </div>
             <a id="reportDownloadLink" className="button primary" href="#" download="reporte-resultados-equipos.png">Guardar imagen</a>
             <img id="reportPreview" alt="Vista previa del reporte generado" />

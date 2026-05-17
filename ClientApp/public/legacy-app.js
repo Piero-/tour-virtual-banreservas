@@ -23,6 +23,7 @@ const SYNC_POLL_INTERVAL_MS = 5000;
 const LOCAL_SAVE_GRACE_MS = 2500;
 const PRESENCE_HEARTBEAT_INTERVAL_MS = 15000;
 const PRESENCE_MAX_DOTS = 18;
+const AUTO_WEEK_CHECK_INTERVAL_MS = 60000;
 
 const defaultTeams = Array.from({ length: MAX_TEAMS }, (_, index) => ({
   id: `team-${index + 1}`,
@@ -44,6 +45,7 @@ const els = {
   categorySelect: document.querySelector("#categorySelect"),
   teamCountInput: document.querySelector("#teamCountInput"),
   weekLimitInput: document.querySelector("#weekLimitInput"),
+  startDateInput: document.querySelector("#startDateInput"),
   showWeeksButton: document.querySelector("#showWeeksButton"),
   finalDonationInput: document.querySelector("#finalDonationInput"),
   paymentTable: document.querySelector("#paymentTable"),
@@ -91,6 +93,7 @@ function createCategoryState(overrides = {}) {
     activeWeek: 1,
     teamCount: MAX_TEAMS,
     weekLimit: MAX_WEEKS,
+    startDate: "",
     paymentDefaultsVersion: PAYMENT_DEFAULTS_VERSION,
     finalDonation: 0,
     finalWeekFee: DEFAULT_FINAL_WEEK_FEE_DOP,
@@ -135,6 +138,7 @@ function normalizeCategoryState(saved = {}) {
     activeWeek: clamp(Number(saved.activeWeek) || 1, 1, MAX_WEEKS),
     teamCount: clamp(Number(saved.teamCount) || MAX_TEAMS, MIN_TEAMS, MAX_TEAMS),
     weekLimit: clamp(Number(saved.weekLimit) || MAX_WEEKS, 1, MAX_WEEKS),
+    startDate: normalizeDateInput(saved.startDate),
     paymentDefaultsVersion: PAYMENT_DEFAULTS_VERSION,
     finalDonation: Math.max(0, Number(saved.finalDonation) || 0),
     finalWeekFee: Math.max(0, Number(saved.finalWeekFee) || DEFAULT_FINAL_WEEK_FEE_DOP),
@@ -156,6 +160,11 @@ function normalizeHiddenWeeks(savedWeeks) {
   return [...new Set(savedWeeks.map(Number))]
     .filter((week) => Number.isInteger(week) && week >= 1 && week <= MAX_WEEKS)
     .sort((a, b) => a - b);
+}
+
+function normalizeDateInput(value) {
+  const normalized = String(value ?? "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(normalized) ? normalized : "";
 }
 
 function normalizeScores(savedScores) {
@@ -576,6 +585,33 @@ function finalDonation() {
   return Math.max(0, Number(state.finalDonation) || 0);
 }
 
+function localDateFromInput(value) {
+  const normalized = normalizeDateInput(value);
+  if (!normalized) return null;
+  const [year, month, day] = normalized.split("-").map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function currentLocalDate() {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+function autoWeekFromStartDate() {
+  const start = localDateFromInput(state.startDate);
+  if (!start) return null;
+  const elapsedDays = Math.floor((currentLocalDate() - start) / 86400000);
+  return clamp(Math.floor(Math.max(0, elapsedDays) / 7) + 1, 1, state.weekLimit);
+}
+
+function applyAutoWeekFromStartDate() {
+  const autoWeek = autoWeekFromStartDate();
+  if (!autoWeek || autoWeek === activeWeek) return false;
+  activeWeek = autoWeek;
+  state.activeWeek = activeWeek;
+  return true;
+}
+
 function setPayment(list, teamId, paid) {
   const nextIds = new Set(list);
   if (paid) {
@@ -587,10 +623,12 @@ function setPayment(list, teamId, paid) {
 }
 
 function render() {
+  applyAutoWeekFromStartDate();
   updateAccessUi();
   els.categorySelect.value = appState.activeCategory;
   els.teamCountInput.value = state.teamCount;
   els.weekLimitInput.value = state.weekLimit;
+  els.startDateInput.value = state.startDate || "";
   els.finalDonationInput.value = state.finalDonation;
   renderWeekOptions();
   renderTeamEditor();
@@ -608,6 +646,7 @@ function switchCategory(category, { updateRoute = true } = {}) {
   appState.activeCategory = category;
   state = appState.categories[category];
   activeWeek = state.activeWeek || 1;
+  applyAutoWeekFromStartDate();
   selectedTeamId = null;
   els.reportExport.hidden = true;
   if (updateRoute) syncCategoryRoute(category);
@@ -1247,22 +1286,24 @@ async function downloadReportImage(mode = "week") {
   const reportLogo = await loadImage(LOGO_SRC);
 
   const scale = 2;
-  const size = 1600;
-  const width = size;
-  const outerPadding = 72;
-  const podiumTop = 236;
-  const podiumBottom = podiumTop + 570;
+  const width = 1600;
+  const outerPadding = 112;
+  const headerHeight = 170;
+  const podiumTop = 248;
+  const firstHeight = 278;
+  const lowerTop = podiumTop + firstHeight + 46;
+  const lowerHeight = 226;
   const otherTeams = sortedTeams.slice(3);
-  const otherGap = 12;
+  const otherGap = 20;
   const otherWidth = width - outerPadding * 2;
   const otherRows = otherTeams.length;
-  const otherHeight = 70;
-  const otherStartY = podiumBottom + (otherRows ? 80 : 42);
-  const footerGap = 86;
+  const otherHeight = 88;
+  const otherStartY = lowerTop + lowerHeight + (otherRows ? 92 : 52);
+  const footerGap = 92;
   const contentBottom = otherRows
     ? otherStartY + otherRows * otherHeight + Math.max(0, otherRows - 1) * otherGap
-    : podiumBottom;
-  const height = Math.max(size, contentBottom + footerGap);
+    : lowerTop + lowerHeight;
+  const height = Math.max(1440, contentBottom + footerGap);
 
   const canvas = document.createElement("canvas");
   canvas.width = width * scale;
@@ -1282,14 +1323,14 @@ async function downloadReportImage(mode = "week") {
   ctx.arc(width - 140, 40, 290, 0, Math.PI * 2);
   ctx.fill();
 
-  drawRoundRect(ctx, outerPadding, 48, width - outerPadding * 2, 160, 28, "#f3ebd4");
-  drawReportLogo(ctx, outerPadding + 34, 72, 112, 96, reportLogo);
+  drawRoundRect(ctx, outerPadding, 48, width - outerPadding * 2, headerHeight, 28, "#f3ebd4");
+  drawReportLogo(ctx, outerPadding + 34, 76, 112, 96, reportLogo);
   ctx.fillStyle = "#006747";
   ctx.font = "900 44px Inter, Arial, sans-serif";
   ctx.fillText(`Tour Virtual Banreservas - Categoría ${appState.activeCategory}`, outerPadding + 166, 108);
   ctx.font = "900 27px Inter, Arial, sans-serif";
   const reportTitle = isOverallReport ? "Reporte overall" : `Lugares ${weekDisplayName(activeWeek).toLowerCase()}`;
-  ctx.fillText(reportTitle, outerPadding + 166, 148);
+  ctx.fillText(reportTitle, outerPadding + 166, 154);
   ctx.fillStyle = "#824d2b";
   ctx.font = "800 18px Inter, Arial, sans-serif";
     const poolSource = isFinalsWeek(activeReportWeek)
@@ -1298,14 +1339,14 @@ async function downloadReportImage(mode = "week") {
     const payoutLine = `${poolSource} | ${formatDop(prizePool(activeReportWeek))} en bolsa | 1ro ${formatDop(
       prizeForPlace(0, activeReportWeek),
     )} | 2do ${formatDop(prizeForPlace(1, activeReportWeek))} | 3ro ${formatDop(prizeForPlace(2, activeReportWeek))}`;
-  ctx.fillText(truncateText(ctx, payoutLine, width - outerPadding * 2 - 190), outerPadding + 166, 176);
+  ctx.fillText(truncateText(ctx, payoutLine, width - outerPadding * 2 - 190), outerPadding + 166, 184);
 
   const first = sortedTeams[0];
   const second = sortedTeams[1];
   const third = sortedTeams[2];
-  if (first) drawPodiumCard(ctx, 250, podiumTop, 1100, 276, first, 1, "gold", mode);
-  if (second) drawPodiumCard(ctx, 128, podiumTop + 322, 644, 248, second, 2, "silver", mode);
-  if (third) drawPodiumCard(ctx, 828, podiumTop + 322, 644, 248, third, 3, "bronze", mode);
+  if (first) drawPodiumCard(ctx, 138, podiumTop, 1324, firstHeight, first, 1, "gold", mode);
+  if (second) drawPodiumCard(ctx, 138, lowerTop, 640, lowerHeight, second, 2, "silver", mode);
+  if (third) drawPodiumCard(ctx, 822, lowerTop, 640, lowerHeight, third, 3, "bronze", mode);
 
   if (otherRows) {
     drawReportRowHeader(ctx, outerPadding, otherStartY - 34, otherWidth, mode);
@@ -1335,8 +1376,7 @@ async function downloadReportImage(mode = "week") {
   els.reportDownloadLink.download = fileName;
   els.reportExportStatus.textContent = "Imagen del reporte lista";
 
-    els.reportDownloadLink.click();
-    els.reportExport.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  els.reportExport.scrollIntoView({ behavior: "smooth", block: "nearest" });
   } catch (error) {
     console.error(error);
     els.reportExport.hidden = false;
@@ -1346,39 +1386,77 @@ async function downloadReportImage(mode = "week") {
 
 function drawPodiumCard(ctx, x, y, width, height, team, reportPlace, tone, mode) {
   const palette = {
-    gold: ["#fff4b8", "#d8a928", "#8f6500"],
-    silver: ["#f7f7f2", "#b8bec4", "#606873"],
-    bronze: ["#f0bf94", "#b66a35", "#6f3618"],
+    gold: ["#fff1a8", "#d8a928", "#8f6500", "#2d2d2d"],
+    silver: ["#f7f7f2", "#b8bec4", "#606873", "#2d2d2d"],
+    bronze: ["#f0bf94", "#b66a35", "#6f3618", "#f3ebd4"],
   }[tone];
   const gradient = ctx.createLinearGradient(x, y, x + width, y + height);
   gradient.addColorStop(0, palette[0]);
   gradient.addColorStop(1, palette[1]);
-  drawRoundRect(ctx, x, y, width, height, 30, gradient);
+  drawRoundRect(ctx, x, y, width, height, 26, gradient);
   ctx.strokeStyle = palette[2];
-  ctx.lineWidth = 4;
-  strokeRoundRect(ctx, x, y, width, height, 30);
+  ctx.lineWidth = 5;
+  strokeRoundRect(ctx, x, y, width, height, 26);
 
-  const cardInset = reportPlace === 1 ? 30 : 28;
-  const badgeWidth = reportPlace === 1 ? 104 : 96;
-  const badgeHeight = reportPlace === 1 ? 86 : 82;
-  const contentX = x + cardInset + badgeWidth + 22;
+  const isFirst = reportPlace === 1;
+  const cardInset = isFirst ? 38 : 34;
+  const badgeSize = isFirst ? 146 : 112;
+  const contentX = x + cardInset + badgeSize + (isFirst ? 30 : 26);
+  const nameY = y + (isFirst ? 96 : 86);
 
-  drawRoundRect(ctx, x + cardInset, y + cardInset, badgeWidth, badgeHeight, 20, "#006747");
+  drawRoundRect(ctx, x + cardInset, y + (height - badgeSize) / 2, badgeSize, badgeSize, 18, "#006747");
   ctx.fillStyle = "#f3ebd4";
-  ctx.font = reportPlace === 1 ? "900 42px Inter, Arial, sans-serif" : "900 38px Inter, Arial, sans-serif";
+  ctx.font = isFirst ? "900 68px Inter, Arial, sans-serif" : "900 52px Inter, Arial, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(`#${reportPlace}`, x + cardInset + badgeWidth / 2, y + cardInset + badgeHeight / 2);
+  ctx.fillText(`#${reportPlace}`, x + cardInset + badgeSize / 2, y + height / 2);
 
   ctx.textAlign = "left";
   ctx.textBaseline = "alphabetic";
-  ctx.fillStyle = "#2d2d2d";
-  ctx.font = reportPlace === 1 ? "900 52px Inter, Arial, sans-serif" : "900 40px Inter, Arial, sans-serif";
+  ctx.fillStyle = palette[3];
+  ctx.font = isFirst ? "900 72px Inter, Arial, sans-serif" : "900 44px Inter, Arial, sans-serif";
   ctx.fillText(
-    truncateText(ctx, reportTeamLabel(team), width - (contentX - x) - cardInset),
+    truncateText(ctx, team.name.toUpperCase(), width - (contentX - x) - cardInset),
     contentX,
-    y + (reportPlace === 1 ? 74 : 72),
+    nameY,
   );
+
+  const chipGap = isFirst ? 18 : 10;
+  const chipHeight = isFirst ? 44 : 34;
+  const chipFont = isFirst ? 27 : 19;
+  const chipAreaWidth = width - (contentX - x) - cardInset;
+  const podiumMetrics = reportCardMetrics(team, mode);
+  const firstRow = podiumMetrics.slice(0, Math.min(2, podiumMetrics.length));
+  const secondRow = podiumMetrics.slice(2);
+  const firstRowWidth = (chipAreaWidth - chipGap * Math.max(0, firstRow.length - 1)) / Math.max(1, firstRow.length);
+  const secondRowWidth = (chipAreaWidth - chipGap * Math.max(0, secondRow.length - 1)) / Math.max(1, secondRow.length);
+  const chipTop = y + (isFirst ? 128 : 108);
+
+  firstRow.forEach((metric, index) => {
+    drawReportPill(
+      ctx,
+      contentX + index * (firstRowWidth + chipGap),
+      chipTop,
+      firstRowWidth,
+      chipHeight,
+      metric,
+      chipFont,
+    );
+  });
+
+  secondRow.forEach((metric, index) => {
+    drawReportPill(
+      ctx,
+      contentX + index * (secondRowWidth + chipGap),
+      chipTop + chipHeight + (isFirst ? 12 : 10),
+      secondRowWidth,
+      chipHeight,
+      metric,
+      chipFont,
+    );
+  });
+  return;
+
   ctx.fillStyle = palette[2];
   ctx.font = "900 21px Inter, Arial, sans-serif";
   const subtitle =
@@ -1405,6 +1483,27 @@ function drawPodiumCard(ctx, x, y, width, height, team, reportPlace, tone, mode)
 }
 
 function drawReportRowHeader(ctx, x, y, width, mode) {
+  const layoutColumns = reportRowColumns(width, mode);
+  ctx.fillStyle = "#f3ebd4";
+  ctx.font = "900 21px Inter, Arial, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  const headerLabels = mode === "overall"
+    ? [
+        ["PUNTOS", layoutColumns.points],
+        ["DINERO TOTAL", layoutColumns.totalMoney],
+      ]
+    : [
+        ["SCORE", layoutColumns.score],
+        ["PUNTOS", layoutColumns.points],
+        ["DINERO SEM", layoutColumns.weekMoney],
+        ["DINERO TOTAL", layoutColumns.totalMoney],
+      ];
+  headerLabels.forEach(([label, column]) => {
+    ctx.fillText(label, x + column.x, y + 18);
+  });
+  return;
+
   drawRoundRect(ctx, x, y, width, 32, 12, "rgba(243, 235, 212, 0.2)");
   const columns = reportRowColumns(width, mode);
   ctx.fillStyle = "rgba(243, 235, 212, 0.82)";
@@ -1427,6 +1526,36 @@ function drawReportRowHeader(ctx, x, y, width, mode) {
 }
 
 function drawCompactReportRow(ctx, x, y, width, height, team, reportPlace, mode) {
+  const layoutColumns = reportRowColumns(width, mode);
+  const layoutCenterY = y + height / 2;
+  drawRoundRect(ctx, x, y, width, height, 12, "#f3ebd4");
+
+  const rankSize = height - 22;
+  drawRoundRect(ctx, x + 34, y + 11, rankSize, rankSize, 10, "#006747");
+  ctx.fillStyle = "#f3ebd4";
+  ctx.font = "900 27px Inter, Arial, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(`#${reportPlace}`, x + 34 + rankSize / 2, layoutCenterY);
+
+  ctx.fillStyle = "#2d2d2d";
+  ctx.font = "900 28px Inter, Arial, sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillText(truncateText(ctx, team.name.toUpperCase(), layoutColumns.name.width), x + layoutColumns.name.x, layoutCenterY);
+
+  ctx.font = "900 25px Inter, Arial, sans-serif";
+  ctx.textAlign = "center";
+  if (mode === "overall") {
+    fitText(ctx, reportPointsValue(team, mode), x + layoutColumns.points.x, layoutCenterY, layoutColumns.points.width, 25, 18);
+    fitText(ctx, formatDop(team.totalMoney), x + layoutColumns.totalMoney.x, layoutCenterY, layoutColumns.totalMoney.width, 25, 16);
+  } else {
+    fitText(ctx, reportScoreValue(team), x + layoutColumns.score.x, layoutCenterY, layoutColumns.score.width, 25, 18);
+    fitText(ctx, reportPointsValue(team, mode), x + layoutColumns.points.x, layoutCenterY, layoutColumns.points.width, 25, 18);
+    fitText(ctx, formatDop(team.weekMoney), x + layoutColumns.weekMoney.x, layoutCenterY, layoutColumns.weekMoney.width, 23, 15);
+    fitText(ctx, formatDop(team.totalMoney), x + layoutColumns.totalMoney.x, layoutCenterY, layoutColumns.totalMoney.width, 23, 15);
+  }
+  return;
+
   drawRoundRect(ctx, x, y, width, height, 18, "#f3ebd4");
   ctx.strokeStyle = "#824d2b";
   ctx.lineWidth = 1.5;
@@ -1475,26 +1604,74 @@ function reportRowColumns(width, mode) {
   if (mode === "overall") {
     return {
       rank: { x: 18, width: 72 },
-      name: { x: 108, width: width * 0.34 },
+      name: { x: 108, width: width * 0.45 },
+      score: { x: width * 0.58, width: 0 },
+      points: { x: width * 0.66, width: width * 0.14 },
       weekPoints: { x: width * 0.5, width: width * 0.14 },
       weekPlace: { x: width * 0.64, width: width * 0.14 },
       weekMoney: { x: width * 0.68, width: 0 },
-      totalMoney: { x: width * 0.8, width: width * 0.19 },
+      totalMoney: { x: width * 0.88, width: width * 0.18 },
     };
   }
 
   return {
     rank: { x: 18, width: 72 },
-    name: { x: 108, width: width * 0.29 },
+    name: { x: 108, width: width * 0.27 },
+    score: { x: width * 0.45, width: width * 0.1 },
+    points: { x: width * 0.57, width: width * 0.11 },
     weekPoints: { x: width * 0.43, width: width * 0.13 },
     weekPlace: { x: width * 0.56, width: width * 0.12 },
-    weekMoney: { x: width * 0.68, width: width * 0.15 },
-    totalMoney: { x: width * 0.84, width: width * 0.15 },
+    weekMoney: { x: width * 0.72, width: width * 0.16 },
+    totalMoney: { x: width * 0.91, width: width * 0.16 },
   };
 }
 
 function reportTeamLabel(team) {
   return team.weekGolfScore ? `${team.name} · ${team.weekGolfScore}` : team.name;
+}
+
+function reportScoreValue(team) {
+  return team.weekGolfScore || "TBD";
+}
+
+function reportPointsValue(team, mode) {
+  const points = mode === "overall" ? team.total : team.weekPoints;
+  return points.toLocaleString();
+}
+
+function reportCardMetrics(team, mode) {
+  if (mode === "overall") {
+    return [
+      `PUNTOS: ${reportPointsValue(team, mode)}`,
+      `TOTAL: ${formatDop(team.totalMoney)}`,
+    ];
+  }
+
+  return [
+    `SCORE: ${reportScoreValue(team)}`,
+    `PUNTOS: ${reportPointsValue(team, mode)}`,
+    `SEM: ${formatDop(team.weekMoney)}`,
+    `TOTAL: ${formatDop(team.totalMoney)}`,
+  ];
+}
+
+function drawReportPill(ctx, x, y, width, height, text, fontSize) {
+  drawRoundRect(ctx, x, y, width, height, height / 2, "#f3ebd4");
+  ctx.fillStyle = "#006747";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  fitText(ctx, text, x + width / 2, y + height / 2 + 1, width - 22, fontSize, 13);
+}
+
+function fitText(ctx, text, x, y, maxWidth, maxFontSize, minFontSize = 12) {
+  const value = String(text);
+  let size = maxFontSize;
+  do {
+    ctx.font = `900 ${size}px Inter, Arial, sans-serif`;
+    if (ctx.measureText(value).width <= maxWidth || size <= minFontSize) break;
+    size -= 1;
+  } while (size >= minFontSize);
+  ctx.fillText(value, x, y);
 }
 
 function drawMetricGrid(ctx, x, y, width, height, metrics, isPodium) {
@@ -1598,7 +1775,20 @@ function handleWeekLimitChange() {
   if (!requireAdmin()) return;
   state.weekLimit = clamp(Number(els.weekLimitInput.value) || MAX_WEEKS, 1, MAX_WEEKS);
   activeWeek = clamp(activeWeek, 1, state.weekLimit);
+  applyAutoWeekFromStartDate();
   state.activeWeek = activeWeek;
+  render();
+}
+
+function handleStartDateChange() {
+  if (!requireAdmin()) return;
+  state.startDate = normalizeDateInput(els.startDateInput.value);
+  applyAutoWeekFromStartDate();
+  render();
+}
+
+function checkAutoWeekSchedule() {
+  if (!applyAutoWeekFromStartDate()) return;
   render();
 }
 
@@ -1714,6 +1904,8 @@ window.addEventListener("popstate", () => {
 
 els.weekLimitInput.addEventListener("input", handleWeekLimitChange);
 els.weekLimitInput.addEventListener("change", handleWeekLimitChange);
+
+els.startDateInput.addEventListener("change", handleStartDateChange);
 
 els.teamCountInput.addEventListener("input", handleTeamCountChange);
 els.teamCountInput.addEventListener("change", handleTeamCountChange);
@@ -1840,3 +2032,4 @@ render();
 window.setInterval(pollForRemoteUpdates, SYNC_POLL_INTERVAL_MS);
 sendPresenceHeartbeat();
 window.setInterval(sendPresenceHeartbeat, PRESENCE_HEARTBEAT_INTERVAL_MS);
+window.setInterval(checkAutoWeekSchedule, AUTO_WEEK_CHECK_INTERVAL_MS);
