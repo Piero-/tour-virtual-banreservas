@@ -47,10 +47,19 @@ export default function App() {
 
   if (!ready) {
     return (
-      <main className="app-shell">
-        <section className="panel">
-          <p className="eyebrow">Cargando</p>
-          <h1>Tour Virtual Banreservas</h1>
+      <main className="splash-screen" aria-busy="true" aria-live="polite">
+        <section className="splash-card">
+          <div className="splash-logo">
+            <img src="/assets/pnglogo.png" alt="HOYO 20" />
+          </div>
+          <div className="splash-copy">
+            <p className="eyebrow">Tour Virtual Banreservas</p>
+            <h1>Preparando leaderboard</h1>
+          </div>
+          <div className="splash-progress" aria-label="Cargando">
+            <span></span>
+          </div>
+          <p className="splash-status">Sincronizando resultados</p>
         </section>
       </main>
     );
@@ -213,7 +222,10 @@ export default function App() {
               <strong id="reportExportStatus">Imagen del reporte lista</strong>
               <span>Revisa la vista previa y guarda la imagen cuando esté lista.</span>
             </div>
-            <a id="reportDownloadLink" className="button primary" href="#" download="reporte-resultados-equipos.png">Guardar imagen</a>
+            <div className="report-actions">
+              <button id="copyReportImageButton" className="button secondary" type="button">Copiar imagen</button>
+              <a id="reportDownloadLink" className="button primary" href="#" download="reporte-resultados-equipos.png">Guardar imagen</a>
+            </div>
             <img id="reportPreview" alt="Vista previa del reporte generado" />
           </div>
           <div className="table-scroll">
@@ -256,6 +268,7 @@ export default function App() {
           </div>
         </div>
       </div>
+      <div id="toast" className="toast" role="status" aria-live="polite" hidden></div>
     </>
   );
 }

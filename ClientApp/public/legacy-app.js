@@ -74,6 +74,7 @@ const els = {
   reportExport: document.querySelector("#reportExport"),
   reportExportStatus: document.querySelector("#reportExportStatus"),
   reportDownloadLink: document.querySelector("#reportDownloadLink"),
+  copyReportImageButton: document.querySelector("#copyReportImageButton"),
   reportPreview: document.querySelector("#reportPreview"),
   finalFeeModal: document.querySelector("#finalFeeModal"),
   finalFeeModalInput: document.querySelector("#finalFeeModalInput"),
@@ -86,6 +87,7 @@ const els = {
   cancelLoginButton: document.querySelector("#cancelLoginButton"),
   submitLoginButton: document.querySelector("#submitLoginButton"),
   authError: document.querySelector("#authError"),
+  toast: document.querySelector("#toast"),
 };
 
 function createCategoryState(overrides = {}) {
@@ -479,6 +481,23 @@ function renderPresenceDots(count) {
     els.presenceDots.append(overflow);
   }
 }
+
+function showToast(message, variant = "success") {
+  if (!els.toast) return;
+  window.clearTimeout(showToast.timeoutId);
+  els.toast.textContent = message;
+  els.toast.dataset.variant = variant;
+  els.toast.hidden = false;
+  requestAnimationFrame(() => els.toast.classList.add("is-visible"));
+  showToast.timeoutId = window.setTimeout(() => {
+    els.toast.classList.remove("is-visible");
+    window.setTimeout(() => {
+      els.toast.hidden = true;
+    }, 180);
+  }, 2400);
+}
+
+showToast.timeoutId = null;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -1396,11 +1415,33 @@ async function downloadReportImage(mode = "week") {
   }
 }
 
+async function copyReportImageToClipboard() {
+  if (!els.reportPreview?.src) return;
+  if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
+    els.reportExportStatus.textContent = "Tu navegador no permite copiar imagen al clipboard.";
+    showToast("Clipboard no disponible", "error");
+    return;
+  }
+
+  try {
+    els.reportExportStatus.textContent = "Copiando imagen...";
+    const response = await fetch(els.reportPreview.src);
+    const blob = await response.blob();
+    await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+    els.reportExportStatus.textContent = "Imagen copiada al clipboard";
+    showToast("Imagen copiada al clipboard");
+  } catch (error) {
+    console.error(error);
+    els.reportExportStatus.textContent = "No se pudo copiar la imagen. Usa Guardar imagen.";
+    showToast("No se pudo copiar la imagen", "error");
+  }
+}
+
 function drawPodiumCard(ctx, x, y, width, height, team, reportPlace, tone, mode) {
   const palette = {
     gold: ["#fff1a8", "#d8a928", "#8f6500", "#2d2d2d"],
     silver: ["#f7f7f2", "#b8bec4", "#606873", "#2d2d2d"],
-    bronze: ["#f0bf94", "#b66a35", "#6f3618", "#f3ebd4"],
+    bronze: ["#f0bf94", "#b66a35", "#6f3618", "#2d2d2d"],
   }[tone];
   const gradient = ctx.createLinearGradient(x, y, x + width, y + height);
   gradient.addColorStop(0, palette[0]);
@@ -2035,6 +2076,8 @@ els.toggleNamesButton.addEventListener("click", () => {
 
 els.downloadWeekButton.addEventListener("click", () => downloadReportImage("week"));
 els.downloadOverallButton.addEventListener("click", () => downloadReportImage("overall"));
+els.copyReportImageButton.addEventListener("click", copyReportImageToClipboard);
+els.reportPreview.addEventListener("click", copyReportImageToClipboard);
 setupDropZone(els.teamPool, "pool");
 els.teamPool.addEventListener("click", () => {
   if (!requireAdmin()) return;
