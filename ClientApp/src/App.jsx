@@ -40,7 +40,11 @@ export default function App() {
     booted.current = true;
 
     const script = document.createElement("script");
-    script.src = "/legacy-app.js?v=20260922-team-members-only";
+    window.downloadSeasonPdf = async (archive) => {
+      const { downloadSeasonPdf } = await import("./season-pdf");
+      return downloadSeasonPdf(archive);
+    };
+    script.src = "/legacy-app.js?v=20260922-season-archive";
     script.async = false;
     document.body.appendChild(script);
   }, [ready]);
@@ -229,6 +233,16 @@ export default function App() {
           <div className="table-scroll">
             <table id="reportTable"></table>
           </div>
+        </section>
+        <section className="panel seasons-panel">
+          <div className="panel-heading">
+            <div>
+              <p className="eyebrow">Historial de tours</p>
+              <h2>Temporadas anteriores</h2>
+            </div>
+            <button id="archiveSeasonButton" className="button secondary admin-only" type="button">Archivar temporada</button>
+          </div>
+          <div id="seasonArchiveList"></div>
         </section>
       </main>
 

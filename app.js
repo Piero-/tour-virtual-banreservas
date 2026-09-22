@@ -39,6 +39,7 @@ let state = appState.categories[appState.activeCategory];
 let activeWeek = state.activeWeek || 1;
 let selectedTeamId = null;
 let apiSaveTimer = null;
+let isArchivingSeason = false;
 let isApplyingRemoteState = false;
 let lastLocalSaveAt = 0;
 let lastKnownStateJson = JSON.stringify(appState);
@@ -228,9 +229,11 @@ function loadAppState() {
 
 function normalizeAppStatePayload(saved) {
   const routeCategory = categoryFromPath();
+  const archives = Array.isArray(saved?.archives) ? saved.archives.filter((entry) => entry && typeof entry.id === "string" && entry.snapshot && Array.isArray(entry.results)) : [];
   if (!saved) {
     return {
       activeCategory: routeCategory || "A",
+      archives,
       categories: {
         A: createCategoryState(),
       },
@@ -240,6 +243,7 @@ function normalizeAppStatePayload(saved) {
   if (saved.categories) {
     return {
       activeCategory: routeCategory || "A",
+      archives,
       categories: {
         A: normalizeCategoryState(saved.categories.A),
       },
@@ -248,6 +252,7 @@ function normalizeAppStatePayload(saved) {
 
   return {
     activeCategory: routeCategory || "A",
+    archives,
     categories: {
       A: normalizeCategoryState(saved),
     },
@@ -396,6 +401,7 @@ function logoutAdmin() {
 }
 
 async function pollForRemoteUpdates() {
+  if (isArchivingSeason) return;
   if (!window.fetch || !API_STATE_URL || isApplyingRemoteState) return;
   if (apiSaveTimer || Date.now() - lastLocalSaveAt < LOCAL_SAVE_GRACE_MS) return;
   if (isUserActivelyEditing()) return;
@@ -411,7 +417,7 @@ async function pollForRemoteUpdates() {
     const remoteJson = JSON.stringify(remoteState);
     if (remoteJson === lastKnownStateJson) return;
 
-    applyRemoteState(remoteState);
+    if (!isArchivingSeason) applyRemoteState(remoteState);
   } catch (error) {
     console.warn("No se pudo sincronizar el estado remoto", error);
   }
@@ -683,8 +689,100 @@ function render() {
   renderStandings();
   renderPayments();
   renderReport();
+  renderSeasonArchives();
   saveState();
 }
+
+function renderSeasonArchives() {
+  const list = document.querySelector("#seasonArchiveList");
+  if (!list) return;
+  list.replaceChildren();
+  if (!appState.archives.length) {
+    list.textContent = "Todavía no hay temporadas archivadas.";
+    return;
+  }
+  for (const archive of [...appState.archives].reverse()) {
+    const details = document.createElement("details");
+    details.className = "season-archive";
+    const summary = document.createElement("summary");
+    summary.textContent = `${archive.name} · ${new Date(archive.archivedAt).toLocaleDateString("es-DO")}`;
+    details.append(summary);
+    if (isAdminMode()) {
+      const download = document.createElement("button");
+      download.className = "button secondary";
+      download.type = "button";
+      download.textContent = "Descargar PDF";
+      download.addEventListener("click", async () => {
+        if (!requireAdmin()) return;
+        download.disabled = true;
+        try { await window.downloadSeasonPdf(archive); }
+        catch { showToast("No se pudo generar el PDF. Intenta de nuevo."); }
+        finally { download.disabled = false; }
+      });
+      details.append(download);
+    }
+    const scroll = document.createElement("div");
+    scroll.className = "table-scroll";
+    const table = document.createElement("table");
+    table.innerHTML = `<thead><tr><th>Equipo</th>${archive.weeks.map((week) => `<th>${escapeHtml(week.name)}</th>`).join("")}<th>Puntos totales</th><th>Premios DOP</th></tr></thead><tbody>${archive.results.map((team) => `<tr><td>${escapeHtml(team.name)}</td>${team.weeks.map((week) => `<td>${week.points} pts${week.score ? ` / ${escapeHtml(week.score)}` : ""}</td>`).join("")}<td>${team.points}</td><td>${formatDop(team.money)}</td></tr>`).join("")}</tbody>`;
+    scroll.append(table);
+    details.append(scroll);
+    list.append(details);
+  }
+}
+
+async function archiveCurrentSeason() {
+  if (!requireAdmin() || isArchivingSeason) return;
+  const name = prompt("Nombre de la temporada que vas a archivar:", `Temporada ${appState.archives.length + 1}`)?.trim();
+  if (!name) return;
+  if (!confirm(`¿Archivar "${name}" y comenzar una temporada nueva? Se conservarán los equipos e integrantes. Los resultados, pagos, fecha de inicio y donación se reiniciarán.`)) return;
+  const button = document.querySelector("#archiveSeasonButton");
+  button.disabled = true;
+  isArchivingSeason = true;
+  window.clearTimeout(apiSaveTimer);
+  apiSaveTimer = null;
+  const archive = {
+    id: crypto.randomUUID(), name: name.slice(0, 100), archivedAt: new Date().toISOString(),
+    category: categoryLabel(), snapshot: structuredClone(state),
+    inscriptionFee: INSCRIPTION_FEE_DOP, inscriptionFinalPool: INSCRIPTION_FINAL_POOL_DOP,
+    regularFee: REGULAR_WEEK_FEE_DOP,
+    weeks: state.weeks.slice(0, state.weekLimit).map((week) => ({ name: weekDisplayName(week), pool: prizePool(week), doublePoints: isDoublePointsWeek(week) })),
+    results: getActiveTeams().map((team) => ({
+      id: team.id, name: team.name, members: normalizeTeamMembers(team.members),
+      inscriptionPaid: state.inscriptionPaidTeamIds.includes(team.id),
+      points: teamTotal(team.id), money: teamMoneyTotal(team.id),
+      weeks: state.weeks.slice(0, state.weekLimit).map((week) => ({
+        points: teamScoreForWeek(team.id, week), score: teamGolfScoreForWeek(team.id, week),
+        place: teamPlaceForWeek(team.id, week) === null ? null : teamPlaceForWeek(team.id, week) + 1,
+        money: teamMoneyForWeek(team.id, week), paid: week.paidTeamIds.includes(team.id),
+      })),
+    })).sort((a, b) => b.points - a.points || a.name.localeCompare(b.name)),
+  };
+  const next = structuredClone(appState);
+  next.archives.push(archive);
+  next.categories[appState.activeCategory] = createCategoryState({
+    teams: structuredClone(state.teams), teamCount: state.teamCount,
+    weekLimit: state.weekLimit, finalWeekFee: state.finalWeekFee,
+  });
+  try {
+    const response = await fetch(API_STATE_URL, {
+      method: "PUT", headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify(next),
+    });
+    if (!response.ok) throw new Error("Archive save failed");
+    Object.assign(appState, next);
+    state = appState.categories[appState.activeCategory];
+    activeWeek = 1;
+    selectedTeamId = null;
+    els.reportExport.hidden = true;
+    render();
+    showToast("Temporada archivada. Nueva temporada lista.");
+  } catch {
+    showToast("No se pudo archivar. Tu temporada actual sigue intacta.", "error");
+  } finally { button.disabled = false; isArchivingSeason = false; }
+}
+
+document.querySelector("#archiveSeasonButton")?.addEventListener("click", archiveCurrentSeason);
 
 function switchCategory(category, { updateRoute = true } = {}) {
   if (category !== "A" || category === appState.activeCategory) return;
