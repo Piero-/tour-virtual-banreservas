@@ -1,4 +1,4 @@
-# Tour Virtual Banreservas
+# Tour Virtual Hoyo 20
 
 Aplicacion para manejar categorias A/B, resultados semanales, pagos, final, donaciones, reportes PNG y standings overall.
 

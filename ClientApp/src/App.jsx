@@ -40,7 +40,7 @@ export default function App() {
     booted.current = true;
 
     const script = document.createElement("script");
-    script.src = "/legacy-app.js?v=20260517-no-autodownload";
+    script.src = "/legacy-app.js?v=20260922-team-members-only";
     script.async = false;
     document.body.appendChild(script);
   }, [ready]);
@@ -53,7 +53,7 @@ export default function App() {
             <img src="/assets/pnglogo.png" alt="HOYO 20" />
           </div>
           <div className="splash-copy">
-            <p className="eyebrow">Tour Virtual Banreservas</p>
+            <p className="eyebrow">Tour Virtual Hoyo 20</p>
             <h1>Preparando leaderboard</h1>
           </div>
           <div className="splash-progress" aria-label="Cargando">
@@ -75,24 +75,22 @@ export default function App() {
             </div>
             <div>
               <p className="eyebrow">Tabla de temporada</p>
-              <h1>Tour Virtual Banreservas</h1>
+              <h1>Tour Virtual Hoyo 20</h1>
             </div>
           </div>
           <div className="golf-art" aria-hidden="true">
-            <span className="art-orbit art-orbit-one"></span>
-            <span className="art-orbit art-orbit-two"></span>
-            <span className="art-green"></span>
-            <span className="art-cup"></span>
-            <span className="art-flag"></span>
-            <span className="art-club"></span>
-            <span className="art-ball"></span>
+            <span className="art-scorecard"></span>
+            <span className="art-fairway"></span>
+            <span className="art-pin"></span>
+            <span className="art-moon"></span>
+            <span className="art-line art-line-one"></span>
+            <span className="art-line art-line-two"></span>
           </div>
           <div className="topbar-actions">
             <label className="field compact">
               <span>Categoría</span>
               <select id="categorySelect">
-                <option value="A">A</option>
-                <option value="B">B</option>
+                <option value="A">A, B y C</option>
               </select>
             </label>
             <label className="field compact admin-only">
@@ -155,11 +153,11 @@ export default function App() {
                 <p className="eyebrow">Equipos</p>
                 <h2>Grupo para arrastrar</h2>
               </div>
-              <button id="toggleNamesButton" className="button secondary" type="button">Editar nombres</button>
+              <button id="toggleNamesButton" className="button secondary" type="button">Ocultar equipos</button>
             </div>
-            <div id="teamEditorWrap" className="team-editor-wrap" hidden>
+            <div id="teamEditorWrap" className="team-editor-wrap">
               <div className="editor-actions">
-                <span>Nombrar equipos activos</span>
+                <span>Equipo e integrantes A, B y C</span>
                 <button id="restoreNamesButton" className="icon-button" type="button" title="Restaurar nombres predeterminados">Reiniciar</button>
               </div>
               <div id="teamEditor" className="team-editor"></div>

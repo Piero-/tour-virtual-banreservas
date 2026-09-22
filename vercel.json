@@ -10,10 +10,6 @@
     {
       "source": "/tour-a",
       "destination": "/"
-    },
-    {
-      "source": "/tour-b",
-      "destination": "/"
     }
   ]
 }

@@ -2,9 +2,9 @@ const POINTS_BY_PLACE = [500, 375, 265, 200, 150, 125, 100, 80, 65, 50, 40, 30];
 const MIN_TEAMS = 3;
 const MAX_TEAMS = 12;
 const MAX_WEEKS = 11;
-const INSCRIPTION_FEE_DOP = 15000;
+const INSCRIPTION_FEE_DOP = 18000;
 const INSCRIPTION_FINAL_POOL_DOP = 10000;
-const INSCRIPTION_HOST_EARNINGS_DOP = 5000;
+const INSCRIPTION_HOST_EARNINGS_DOP = INSCRIPTION_FEE_DOP - INSCRIPTION_FINAL_POOL_DOP;
 const REGULAR_WEEK_FEE_DOP = 6000;
 const DEFAULT_FINAL_WEEK_FEE_DOP = 9000;
 const STORAGE_KEY = "team-results-tracker:v1";
@@ -12,7 +12,9 @@ const MEDAL_TONES = ["gold", "silver", "bronze"];
 const LOGO_SRC = "/assets/pnglogo.png";
 const CATEGORY_ROUTES = {
   A: "/tour-a",
-  B: "/tour-b",
+};
+const CATEGORY_LABELS = {
+  A: "A, B y C",
 };
 const PAYMENT_DEFAULTS_VERSION = 2;
 const API_STATE_URL = window.TOUR_API_STATE_URL || "/api/state";
@@ -28,6 +30,8 @@ const AUTO_WEEK_CHECK_INTERVAL_MS = 60000;
 const defaultTeams = Array.from({ length: MAX_TEAMS }, (_, index) => ({
   id: `team-${index + 1}`,
   name: `Equipo ${index + 1}`,
+  captain: "",
+  members: { A: "", B: "", C: "" },
 }));
 
 const appState = loadAppState();
@@ -135,6 +139,8 @@ function normalizeCategoryState(saved = {}) {
   const teams = defaultTeams.map((team, index) => ({
     ...team,
     name: normalizeSavedTeamName(saved.teams?.[index]?.name, index),
+    captain: normalizeSavedCaptain(saved.teams?.[index]?.captain),
+    members: normalizeTeamMembers(saved.teams?.[index]?.members),
   }));
 
   return createCategoryState({
@@ -227,18 +233,15 @@ function normalizeAppStatePayload(saved) {
       activeCategory: routeCategory || "A",
       categories: {
         A: createCategoryState(),
-        B: createCategoryState(),
       },
     };
   }
 
   if (saved.categories) {
-    const activeCategory = routeCategory || (saved.activeCategory === "B" ? "B" : "A");
     return {
-      activeCategory,
+      activeCategory: routeCategory || "A",
       categories: {
         A: normalizeCategoryState(saved.categories.A),
-        B: normalizeCategoryState(saved.categories.B),
       },
     };
   }
@@ -247,7 +250,6 @@ function normalizeAppStatePayload(saved) {
     activeCategory: routeCategory || "A",
     categories: {
       A: normalizeCategoryState(saved),
-      B: createCategoryState(),
     },
   };
 }
@@ -255,8 +257,15 @@ function normalizeAppStatePayload(saved) {
 function categoryFromPath(pathname = window.location.pathname) {
   const normalizedPath = String(pathname || "").replace(/\/+$/, "") || "/";
   if (normalizedPath === CATEGORY_ROUTES.A) return "A";
-  if (normalizedPath === CATEGORY_ROUTES.B) return "B";
   return null;
+}
+
+function categoryLabel(category = appState.activeCategory) {
+  return CATEGORY_LABELS[category] || category;
+}
+
+function categoryFileLabel(category = appState.activeCategory) {
+  return categoryLabel(category).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
 
 function syncCategoryRoute(category, { replace = false } = {}) {
@@ -327,7 +336,9 @@ function updateAccessUi() {
     closeActionMenus();
     els.reportExport.hidden = true;
     els.teamEditorWrap.hidden = true;
-    els.toggleNamesButton.textContent = "Editar nombres";
+    els.toggleNamesButton.textContent = "Editar equipos";
+  } else if (els.teamEditorWrap && els.toggleNamesButton) {
+    els.toggleNamesButton.textContent = els.teamEditorWrap.hidden ? "Editar equipos" : "Ocultar equipos";
   }
 }
 
@@ -508,6 +519,10 @@ function normalizeSavedTeamName(name, index) {
   return name;
 }
 
+function normalizeSavedCaptain(captain) {
+  return String(captain ?? "").trimStart().slice(0, 40);
+}
+
 function getWeek(weekNumber = activeWeek) {
   return state.weeks[weekNumber - 1];
 }
@@ -672,7 +687,7 @@ function render() {
 }
 
 function switchCategory(category, { updateRoute = true } = {}) {
-  if (!["A", "B"].includes(category) || category === appState.activeCategory) return;
+  if (category !== "A" || category === appState.activeCategory) return;
   saveState();
   appState.activeCategory = category;
   state = appState.categories[category];
@@ -702,6 +717,12 @@ function renderWeekOptions() {
   renderPrizeSubtitle();
 }
 
+function normalizeTeamMembers(members) {
+  return Object.fromEntries(["A", "B", "C"].map((category) => [
+    category, normalizeSavedCaptain(members?.[category]),
+  ]));
+}
+
 function renderTeamEditor() {
   if (!isAdminMode()) {
     els.teamEditor.innerHTML = "";
@@ -710,17 +731,25 @@ function renderTeamEditor() {
 
   els.teamEditor.innerHTML = "";
   getActiveTeams().forEach((team, index) => {
-    const row = document.createElement("label");
+    team.captain = normalizeSavedCaptain(team.captain);
+
+    const row = document.createElement("div");
     row.className = "team-name-row";
     row.innerHTML = `<span>${index + 1}</span>`;
+    const summary = document.createElement("div");
+    summary.className = "team-editor-summary";
+    const teamLabel = document.createElement("strong");
+    teamLabel.textContent = team.name;
 
     const input = document.createElement("input");
     input.value = team.name;
     input.maxLength = 32;
+    input.placeholder = "Nombre del equipo";
     input.setAttribute("aria-label", `Nombre del equipo ${index + 1}`);
     input.addEventListener("input", () => {
       if (!requireAdmin()) return;
       team.name = input.value.trimStart() || `Equipo ${index + 1}`;
+      teamLabel.textContent = team.name;
       saveState();
       renderPool();
       renderPlacements();
@@ -728,7 +757,50 @@ function renderTeamEditor() {
       renderReport();
     });
 
-    row.append(input);
+    const fields = document.createElement("div");
+    fields.className = "team-editor-fields";
+    fields.id = `edit-fields-${team.id}`;
+    fields.hidden = true;
+    const editIcon = document.createElement("button");
+    editIcon.type = "button";
+    editIcon.className = "team-edit-icon";
+    editIcon.setAttribute("aria-label", `Editar equipo ${index + 1}`);
+    editIcon.setAttribute("aria-expanded", "false");
+    editIcon.setAttribute("aria-controls", fields.id);
+    editIcon.title = "Editar equipo";
+    editIcon.textContent = "✎";
+    editIcon.addEventListener("click", () => {
+      fields.hidden = !fields.hidden;
+      editIcon.setAttribute("aria-expanded", String(!fields.hidden));
+      editIcon.title = fields.hidden ? "Editar equipo" : "Cerrar edición";
+      if (!fields.hidden) input.focus();
+    });
+    summary.append(teamLabel, editIcon);
+    fields.append(input);
+
+    team.members = normalizeTeamMembers(team.members);
+    for (const category of ["A", "B", "C"]) {
+      const memberLabel = document.createElement("label");
+      memberLabel.className = "team-member-editor";
+      const badge = document.createElement("b");
+      badge.className = "member-category-badge";
+      badge.textContent = category;
+      const memberInput = document.createElement("input");
+      memberInput.value = team.members[category];
+      memberInput.maxLength = 40;
+      memberInput.placeholder = `Integrante ${category}`;
+      memberInput.setAttribute("aria-label", `Integrante categoría ${category} de ${team.name}`);
+      memberInput.addEventListener("input", () => {
+        if (!requireAdmin()) return;
+        team.members[category] = memberInput.value.trimStart();
+        saveState();
+        renderStandings();
+      });
+      memberLabel.append(memberInput, badge);
+      fields.append(memberLabel);
+    }
+
+    row.append(summary, fields);
     els.teamEditor.append(row);
   });
 }
@@ -1071,7 +1143,13 @@ function renderStandings() {
     row.className = `standing-row ${medalTone ? `medal-${medalTone}` : ""}`;
     row.innerHTML = `
       <span class="rank">${index + 1}</span>
-      <span class="name" title="${escapeHtml(team.name)}">${escapeHtml(team.name)}</span>
+      <span class="standing-team">
+        <span class="name" title="${escapeHtml(team.name)}">${escapeHtml(team.name)}</span>
+        <span class="team-members">${Object.entries(normalizeTeamMembers(team.members))
+          .filter(([, name]) => name.trim())
+          .map(([category, name]) => `<span class="team-member"><span>${escapeHtml(name)}</span><b class="member-category-badge" aria-label="Categoría ${category}">${category}</b></span>`)
+          .join("")}</span>
+      </span>
       <span class="points">${team.total.toLocaleString()} pts</span>
     `;
     els.standingsList.append(row);
@@ -1169,7 +1247,7 @@ function renderPayments() {
     : `${weekDisplayName(activeWeek)}: ${paidCountForWeek(getWeek())} pagos, bolsa ${formatDop(activeWeekPool)}`;
   els.paymentSummary.textContent = `${inscriptionPaidCount()} inscripciones pagadas: ${formatDop(
     finalPoolFromInscriptions(),
-  )} al pool final y ${formatDop(hostEarningsFromInscriptions())} para el host | Donación final: ${formatDop(
+  )} al pool final | Donación final: ${formatDop(
     finalDonation(),
   )} | ${activeWeekSummary} | Total recibido: ${formatDop(
     totalPaid,
@@ -1205,7 +1283,7 @@ function downloadDataFile() {
   if (!requireAdmin()) return;
   saveState();
   const payload = {
-    project: "Tour Virtual Banreservas",
+    project: "Tour Virtual Hoyo 20",
     version: 1,
     exportedAt: new Date().toISOString(),
     data: appState,
@@ -1358,7 +1436,7 @@ async function downloadReportImage(mode = "week") {
   drawReportLogo(ctx, outerPadding + 34, 76, 112, 96, reportLogo);
   ctx.fillStyle = "#006747";
   ctx.font = "900 44px Inter, Arial, sans-serif";
-  ctx.fillText(`Tour Virtual Banreservas - Categoría ${appState.activeCategory}`, outerPadding + 166, 108);
+  ctx.fillText(`Tour Virtual Hoyo 20 - Categoría ${categoryLabel()}`, outerPadding + 166, 108);
   ctx.font = "900 27px Inter, Arial, sans-serif";
   const reportTitle = isOverallReport ? "Reporte overall" : `Lugares ${weekDisplayName(activeWeek).toLowerCase()}`;
   ctx.fillText(reportTitle, outerPadding + 166, 154);
@@ -1399,8 +1477,8 @@ async function downloadReportImage(mode = "week") {
 
     const imageUrl = canvas.toDataURL("image/png");
     const fileName = isOverallReport
-      ? `reporte-tour-virtual-categoria-${appState.activeCategory}-overall-semana-${activeWeek}.png`
-      : `reporte-tour-virtual-categoria-${appState.activeCategory}-lugares-semana-${activeWeek}.png`;
+      ? `reporte-tour-virtual-categoria-${categoryFileLabel()}-overall-semana-${activeWeek}.png`
+      : `reporte-tour-virtual-categoria-${categoryFileLabel()}-lugares-semana-${activeWeek}.png`;
 
   els.reportPreview.src = imageUrl;
   els.reportDownloadLink.href = imageUrl;
@@ -1439,9 +1517,9 @@ async function copyReportImageToClipboard() {
 
 function drawPodiumCard(ctx, x, y, width, height, team, reportPlace, tone, mode) {
   const palette = {
-    gold: ["#fff1a8", "#d8a928", "#8f6500", "#2d2d2d"],
-    silver: ["#f7f7f2", "#b8bec4", "#606873", "#2d2d2d"],
-    bronze: ["#f0bf94", "#b66a35", "#6f3618", "#2d2d2d"],
+    gold: ["#f4d982", "#b98426", "#5c3a0f", "#241a0b"],
+    silver: ["#e8ece8", "#9ea7a2", "#3f4945", "#1d2421"],
+    bronze: ["#2d2d2d", "#151515", "#824d2b", "#f3ebd4"],
   }[tone];
   const gradient = ctx.createLinearGradient(x, y, x + width, y + height);
   gradient.addColorStop(0, palette[0]);
@@ -1778,6 +1856,11 @@ function loadImage(src) {
 
 function drawReportLogo(ctx, x, y, width, height, image = null) {
   if (!image) throw new Error("HOYO 20 logo could not be loaded.");
+  drawRoundRect(ctx, x - 12, y - 10, width + 24, height + 20, 16, "rgba(243, 235, 212, 0.96)");
+  ctx.strokeStyle = "rgba(130, 77, 43, 0.34)";
+  ctx.lineWidth = 2;
+  strokeRoundRect(ctx, x - 12, y - 10, width + 24, height + 20, 16);
+
   const imageRatio = image.naturalWidth / image.naturalHeight;
   const boxRatio = width / height;
   const drawWidth = imageRatio > boxRatio ? width : height * imageRatio;
@@ -2043,7 +2126,7 @@ els.clearWeekButton.addEventListener("click", () => {
 
 els.resetButton.addEventListener("click", () => {
   if (!requireAdmin()) return;
-  if (!confirm(`¿Reiniciar todos los datos de la categoría ${appState.activeCategory}?`)) return;
+  if (!confirm(`¿Reiniciar todos los datos de la categoría ${categoryLabel()}?`)) return;
   state = createCategoryState();
   appState.categories[appState.activeCategory] = state;
   activeWeek = 1;
@@ -2071,7 +2154,7 @@ els.toggleNamesButton.addEventListener("click", () => {
   if (!requireAdmin()) return;
   const isHidden = els.teamEditorWrap.hidden;
   els.teamEditorWrap.hidden = !isHidden;
-  els.toggleNamesButton.textContent = isHidden ? "Ocultar nombres" : "Editar nombres";
+  els.toggleNamesButton.textContent = isHidden ? "Ocultar equipos" : "Editar equipos";
 });
 
 els.downloadWeekButton.addEventListener("click", () => downloadReportImage("week"));
