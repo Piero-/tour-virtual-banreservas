@@ -6,7 +6,12 @@ const money = (value) => `DOP ${Number(value || 0).toLocaleString("en-US")}`;
 export function createSeasonPdf(archive) {
   const doc = new jsPDF();
   const margin = 16;
+  function pageBackground() {
+    doc.setFillColor("#101a16");
+    doc.rect(0, 0, 210, 297, "F");
+  }
   function heading(title, subtitle) {
+    pageBackground();
     doc.setFillColor("#006747");
     doc.rect(0, 0, 210, 35, "F");
     doc.setTextColor("#f3ebd4");
@@ -15,7 +20,7 @@ export function createSeasonPdf(archive) {
     doc.text("Tour Virtual Hoyo 20", margin, 15);
     doc.setFontSize(11);
     doc.text(title, margin, 25);
-    doc.setTextColor("#2d2d2d");
+    doc.setTextColor("#f3ebd4");
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
     const lines = doc.splitTextToSize(subtitle, 178);
@@ -26,9 +31,10 @@ export function createSeasonPdf(archive) {
     autoTable(doc, {
       startY, head: [head], body,
       margin: { left: margin, right: margin, top: 18, bottom: 18 },
-      styles: { font: "helvetica", fontSize: 9, cellPadding: 3, overflow: "linebreak" },
+      styles: { font: "helvetica", fontSize: 9, cellPadding: 3, overflow: "linebreak", fillColor: "#202c26", textColor: "#f3ebd4", lineColor: "#46534a" },
       headStyles: { fillColor: "#006747", textColor: "#f3ebd4" },
-      alternateRowStyles: { fillColor: "#f3ebd4" },
+      alternateRowStyles: { fillColor: "#18231d" },
+      willDrawPage: (data) => { if (data.pageNumber > 1) pageBackground(); },
       rowPageBreak: "avoid",
     });
   }
@@ -55,7 +61,7 @@ export function createSeasonPdf(archive) {
   for (let page = 1; page <= pages; page++) {
     doc.setPage(page);
     doc.setFontSize(8);
-    doc.setTextColor("#555555");
+    doc.setTextColor("#d9ceb7");
     doc.text(`Tour Virtual Hoyo 20 | ${page} / ${pages}`, margin, 287);
   }
   return doc;

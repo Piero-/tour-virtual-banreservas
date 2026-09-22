@@ -44,7 +44,7 @@ export default function App() {
       const { downloadSeasonPdf } = await import("./season-pdf");
       return downloadSeasonPdf(archive);
     };
-    script.src = "/legacy-app.js?v=20260922-season-archive";
+    script.src = "/legacy-app.js?v=20260922-copper-report-gradient";
     script.async = false;
     document.body.appendChild(script);
   }, [ready]);

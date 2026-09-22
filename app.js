@@ -1519,9 +1519,9 @@ async function downloadReportImage(mode = "week") {
   ctx.scale(scale, scale);
 
   const background = ctx.createLinearGradient(0, 0, width, height);
-  background.addColorStop(0, "#004f36");
-  background.addColorStop(0.56, "#006747");
-  background.addColorStop(1, "#00563c");
+  background.addColorStop(0, "#101a16");
+  background.addColorStop(0.56, "#16251f");
+  background.addColorStop(1, "#101412");
   ctx.fillStyle = background;
   ctx.fillRect(0, 0, width, height);
 
@@ -1530,15 +1530,15 @@ async function downloadReportImage(mode = "week") {
   ctx.arc(width - 140, 40, 290, 0, Math.PI * 2);
   ctx.fill();
 
-  drawRoundRect(ctx, outerPadding, 48, width - outerPadding * 2, headerHeight, 28, "#f3ebd4");
+  drawRoundRect(ctx, outerPadding, 48, width - outerPadding * 2, headerHeight, 28, "#006747");
   drawReportLogo(ctx, outerPadding + 34, 76, 112, 96, reportLogo);
-  ctx.fillStyle = "#006747";
+  ctx.fillStyle = "#f3ebd4";
   ctx.font = "900 44px Inter, Arial, sans-serif";
   ctx.fillText(`Tour Virtual Hoyo 20 - Categoría ${categoryLabel()}`, outerPadding + 166, 108);
   ctx.font = "900 27px Inter, Arial, sans-serif";
   const reportTitle = isOverallReport ? "Reporte overall" : `Lugares ${weekDisplayName(activeWeek).toLowerCase()}`;
   ctx.fillText(reportTitle, outerPadding + 166, 154);
-  ctx.fillStyle = "#824d2b";
+  ctx.fillStyle = "#e2dccb";
   ctx.font = "800 18px Inter, Arial, sans-serif";
     const poolSource = isFinalsWeek(activeReportWeek)
       ? `${inscriptionPaidCount()} inscripciones + ${paidCountForWeek(activeReportWeek)} pagos GRAN FINAL + donación`
@@ -1617,14 +1617,27 @@ function drawPodiumCard(ctx, x, y, width, height, team, reportPlace, tone, mode)
   const palette = {
     gold: ["#f4d982", "#b98426", "#5c3a0f", "#241a0b"],
     silver: ["#e8ece8", "#9ea7a2", "#3f4945", "#1d2421"],
-    bronze: ["#2d2d2d", "#151515", "#824d2b", "#f3ebd4"],
+    bronze: ["#2d2d2d", "#151515", "#715345", "#f3ebd4"],
   }[tone];
-  const gradient = ctx.createLinearGradient(x, y, x + width, y + height);
+  const angle = 145 * Math.PI / 180;
+  const dx = Math.sin(angle);
+  const dy = -Math.cos(angle);
+  const length = Math.abs(width * dx) + Math.abs(height * dy);
+  const centerX = x + width / 2;
+  const centerY = y + height / 2;
+  const gradient = tone === "bronze"
+    ? ctx.createLinearGradient(centerX - dx * length / 2, centerY - dy * length / 2, centerX + dx * length / 2, centerY + dy * length / 2)
+    : ctx.createLinearGradient(x, y, x + width, y + height);
   gradient.addColorStop(0, palette[0]);
-  gradient.addColorStop(1, palette[1]);
+  if (tone === "bronze") {
+    gradient.addColorStop(0.68, "#151515");
+    gradient.addColorStop(1, "#824d2b");
+  } else {
+    gradient.addColorStop(1, palette[1]);
+  }
   drawRoundRect(ctx, x, y, width, height, 26, gradient);
   ctx.strokeStyle = palette[2];
-  ctx.lineWidth = 5;
+  ctx.lineWidth = tone === "bronze" ? 3 : 5;
   strokeRoundRect(ctx, x, y, width, height, 26);
 
   const isFirst = reportPlace === 1;
@@ -1757,7 +1770,10 @@ function drawReportRowHeader(ctx, x, y, width, mode) {
 function drawCompactReportRow(ctx, x, y, width, height, team, reportPlace, mode) {
   const layoutColumns = reportRowColumns(width, mode);
   const layoutCenterY = y + height / 2;
-  drawRoundRect(ctx, x, y, width, height, 12, "#f3ebd4");
+  drawRoundRect(ctx, x, y, width, height, 12, "#202c26");
+  ctx.strokeStyle = "#46534a";
+  ctx.lineWidth = 1;
+  strokeRoundRect(ctx, x, y, width, height, 12);
 
   const rankSize = height - 22;
   drawRoundRect(ctx, x + 34, y + 11, rankSize, rankSize, 10, "#006747");
@@ -1767,7 +1783,7 @@ function drawCompactReportRow(ctx, x, y, width, height, team, reportPlace, mode)
   ctx.textBaseline = "middle";
   ctx.fillText(`#${reportPlace}`, x + 34 + rankSize / 2, layoutCenterY);
 
-  ctx.fillStyle = "#2d2d2d";
+  ctx.fillStyle = "#f3ebd4";
   ctx.font = "900 28px Inter, Arial, sans-serif";
   ctx.textAlign = "left";
   ctx.fillText(truncateText(ctx, team.name.toUpperCase(), layoutColumns.name.width), x + layoutColumns.name.x, layoutCenterY);
@@ -1885,8 +1901,8 @@ function reportCardMetrics(team, mode) {
 }
 
 function drawReportPill(ctx, x, y, width, height, text, fontSize) {
-  drawRoundRect(ctx, x, y, width, height, height / 2, "#f3ebd4");
-  ctx.fillStyle = "#006747";
+  drawRoundRect(ctx, x, y, width, height, height / 2, "#18231d");
+  ctx.fillStyle = "#f3ebd4";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   fitText(ctx, text, x + width / 2, y + height / 2 + 1, width - 22, fontSize, 13);
