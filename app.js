@@ -2244,6 +2244,8 @@ els.importDataInput.addEventListener("change", importDataFile);
 
 els.restoreNamesButton.addEventListener("click", () => {
   if (!requireAdmin()) return;
+  if (!confirm("¿Quieres reiniciar los equipos? Se restaurarán sus nombres predeterminados y se borrarán los nombres de sus integrantes.")) return;
+  if (!confirm("Confirmación final: ¿reiniciar los equipos y borrar sus integrantes? Esta acción no se puede deshacer. Los resultados y pagos se conservarán.")) return;
   state.teams = structuredClone(defaultTeams);
   render();
 });
