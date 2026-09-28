@@ -3025,3 +3025,83 @@ body {
   outline: 2px solid #648674;
   outline-offset: 2px;
 }
+
+#manageUsersButton[hidden] { display: none; }
+.presence-dot { position: relative; cursor: help; }
+.presence-dot:hover::after,
+.presence-dot:focus::after {
+  content: attr(data-name);
+  position: absolute;
+  top: calc(100% + 12px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 7px 10px;
+  border: 1px solid #526459;
+  border-radius: 6px;
+  background: #18231d;
+  color: #f3ebd4;
+  font-size: 13px;
+  white-space: nowrap;
+  z-index: 100;
+}
+#usersError { color: #ffb4a8; }
+.payment-audit {
+  margin-top: 20px;
+  border-top: 1px solid #34463d;
+  padding-top: 16px;
+  color: #f3ebd4;
+}
+.payment-audit summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 8px 0;
+}
+#paymentAuditEntries {
+  margin-top: 8px;
+  max-height: min(960px, 65vh);
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+  overscroll-behavior-y: contain;
+  font-size: 13px;
+}
+.payment-scroll,
+#paymentAuditEntries {
+  color-scheme: dark;
+  scrollbar-width: thin;
+  scrollbar-color: #39735b #10271e;
+}
+.payment-scroll::-webkit-scrollbar,
+#paymentAuditEntries::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.payment-scroll::-webkit-scrollbar-track,
+#paymentAuditEntries::-webkit-scrollbar-track {
+  background: #10271e;
+  border-radius: 12px;
+}
+.payment-scroll::-webkit-scrollbar-thumb,
+#paymentAuditEntries::-webkit-scrollbar-thumb {
+  background: #39735b;
+  border: 2px solid #10271e;
+  border-radius: 12px;
+}
+.payment-scroll::-webkit-scrollbar-thumb:hover,
+#paymentAuditEntries::-webkit-scrollbar-thumb:hover {
+  background: #518b70;
+}
+.payment-scroll::-webkit-scrollbar-corner { background: #10271e; }
+.payment-audit-entry {
+  box-sizing: border-box;
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px 20px;
+  padding: 12px 0;
+  border-bottom: 1px solid #293c32;
+  overflow-wrap: anywhere;
+}
+.payment-audit-entry time { color: #b7c5bb; font-size: 12px; }

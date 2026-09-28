@@ -20,6 +20,7 @@ export default function App() {
             headers: { Authorization: `Bearer ${token}` }, cache: "no-store",
           });
           if (session.status === 401) localStorage.removeItem("tour-admin-token");
+          if (session.ok) window.TOUR_USER = await session.json();
         } catch { /* Keep the saved session when the server is temporarily unavailable. */ }
       }
       try {
@@ -53,7 +54,7 @@ export default function App() {
       const { downloadSeasonPdf } = await import("./season-pdf");
       return downloadSeasonPdf(archive);
     };
-    script.src = "/legacy-app.js?v=20260928-payment-content-width";
+    script.src = "/legacy-app.js?v=20260928-named-users";
     script.async = false;
     document.body.appendChild(script);
   }, [ready]);
@@ -136,6 +137,7 @@ export default function App() {
               </div>
             </details>
             <div id="presenceDots" className="presence-dots" aria-label="Personas viendo en vivo"></div>
+            <button id="manageUsersButton" className="button secondary" type="button" hidden>Usuarios</button>
             <div className="session-actions">
               <button id="loginButton" className="login-button" type="button">Login</button>
               <button id="signOutButton" className="sign-out-button" type="button" hidden>Cerrar sesión</button>
@@ -223,6 +225,10 @@ export default function App() {
           <div className="table-scroll payment-scroll">
             <table id="paymentTable" className="payment-table"></table>
           </div>
+          <details id="paymentAudit" className="payment-audit">
+            <summary>Auditoría de pagos</summary>
+            <div id="paymentAuditEntries" aria-live="polite"></div>
+          </details>
         </section>
 
         <section className="panel report-panel">
@@ -283,15 +289,32 @@ export default function App() {
             <h2 id="adminLoginTitle">Modo edición</h2>
           </div>
           <label className="field">
-            <span>Password</span>
+            <span>Usuario</span>
+            <input id="adminUsernameInput" type="text" autoComplete="username" autoCapitalize="none" spellCheck="false" />
+          </label>
+          <label className="field">
+            <span>Contraseña</span>
             <input id="adminPasswordInput" type="password" autoComplete="current-password" />
           </label>
-          <p id="authError" className="auth-error" hidden>Password incorrecto.</p>
+          <p id="authError" className="auth-error" hidden>Usuario o contraseña incorrectos.</p>
           <div className="modal-actions">
             <button id="cancelLoginButton" className="button secondary" type="button">Cancelar</button>
             <button id="submitLoginButton" className="button primary" type="button">Entrar</button>
           </div>
         </div>
+      </div>
+      <div id="usersModal" className="modal-backdrop" hidden>
+        <form id="usersForm" className="modal-card compact-modal" role="dialog" aria-modal="true" aria-labelledby="usersTitle">
+          <h2 id="usersTitle">Administrar usuarios</h2>
+          <label className="field"><span>Usuario</span><input id="managedUsername" type="text" autoComplete="off" autoCapitalize="none" spellCheck="false" required /></label>
+          <label className="field"><span>Nueva contraseña</span><input id="managedPassword" type="password" autoComplete="new-password" minLength="4" maxLength="100" required /></label>
+          <p>Al cambiar la contraseña se cerrarán todas las sesiones de ese usuario.</p>
+          <p id="usersError" role="alert" hidden></p>
+          <div className="modal-actions">
+            <button id="closeUsersButton" className="button secondary" type="button">Cancelar</button>
+            <button id="saveUserButton" className="button primary" type="submit">Cambiar contraseña</button>
+          </div>
+        </form>
       </div>
       <div id="toast" className="toast" role="status" aria-live="polite" hidden></div>
     </>

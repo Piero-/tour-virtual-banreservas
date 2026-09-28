@@ -9,9 +9,8 @@ using TourVirtual.Api.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 var activeViewers = new ConcurrentDictionary<string, DateTimeOffset>();
+var viewerNames = new ConcurrentDictionary<string, string>();
 var viewerTimeout = TimeSpan.FromSeconds(35);
-var adminSessionTimeout = TimeSpan.FromDays(30);
-var adminPassword = Environment.GetEnvironmentVariable("ADMIN_PASSWORD") ?? "hoyo2010";
 
 var port = Environment.GetEnvironmentVariable("PORT");
 if (!string.IsNullOrWhiteSpace(port))
@@ -58,6 +57,7 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.EnsureCreated();
+    UserAuth.Seed(db).GetAwaiter().GetResult();
 }
 
 app.UseCors();
@@ -76,7 +76,10 @@ app.MapPost("/api/auth/login", async (JsonElement payload, AppDbContext db) =>
         ? passwordProperty.GetString()
         : null;
 
-    if (password != adminPassword)
+    var username = payload.TryGetProperty("username", out var usernameProperty)
+        ? usernameProperty.GetString()?.Trim().ToLowerInvariant() ?? "" : "";
+    var user = await UserAuth.Find(db, username);
+    if (user is null || password is null || !UserAuth.Verify(user, password))
     {
         return Results.Unauthorized();
     }
@@ -86,14 +89,42 @@ app.MapPost("/api/auth/login", async (JsonElement payload, AppDbContext db) =>
         .Replace("/", "_", StringComparison.Ordinal)
         .TrimEnd('=');
 
-    db.AppStates.Add(new AppStateRecord { Key = SessionKey(token), Json = "{}" });
+    db.AppStates.Add(new AppStateRecord { Key = SessionKey(token), Json = JsonSerializer.Serialize(new UserSession(user.Username, user.Version)) });
     await db.SaveChangesAsync();
-    return Results.Ok(new { token });
+    return Results.Ok(new { token, username = user.Username, canManageUsers = user.Username == "piero" });
 });
 
 app.MapGet("/api/auth/session", async (HttpContext context, AppDbContext db) =>
-    await IsAuthorizedAdmin(context, db, DateTimeOffset.UtcNow, adminSessionTimeout)
-        ? Results.NoContent() : Results.Unauthorized());
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var user = await UserAuth.Current(context, db);
+    return user is null ? Results.Unauthorized() : Results.Ok(new { username = user.Username, canManageUsers = user.Username == "piero" });
+});
+
+app.MapGet("/api/users", async (HttpContext context, AppDbContext db) =>
+{
+    var user = await UserAuth.Current(context, db);
+    if (user is null) return Results.Unauthorized();
+    if (user.Username != "piero") return Results.StatusCode(403);
+    return Results.Ok(UserAuth.Usernames.Select(username => new { username }));
+});
+
+app.MapPut("/api/users/{username}/password", async (string username, JsonElement payload, HttpContext context, AppDbContext db) =>
+{
+    var current = await UserAuth.Current(context, db);
+    if (current is null) return Results.Unauthorized();
+    if (current.Username != "piero") return Results.StatusCode(403);
+    if (!UserAuth.Usernames.Contains(username)) return Results.NotFound();
+    var password = payload.TryGetProperty("password", out var property) ? property.GetString() : null;
+    if (string.IsNullOrWhiteSpace(password) || password.Length < 4 || password.Length > 100)
+        return Results.BadRequest(new { error = "Usa entre 4 y 100 caracteres." });
+    var row = await db.AppStates.FirstAsync(row => row.Key == "user:" + username);
+    row.Json = JsonSerializer.Serialize(UserAuth.WithPassword(username, password));
+    row.UpdatedAt = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync();
+    foreach (var viewer in viewerNames.Where(item => item.Value == username)) viewerNames.TryRemove(viewer.Key, out _);
+    return Results.NoContent();
+});
 
 app.MapPost("/api/auth/logout", async (HttpContext context, AppDbContext db) =>
 {
@@ -109,13 +140,15 @@ app.MapPost("/api/auth/logout", async (HttpContext context, AppDbContext db) =>
 
 app.MapPut("/api/state", async (JsonElement payload, AppDbContext db, HttpContext httpContext) =>
 {
-    if (!await IsAuthorizedAdmin(httpContext, db, DateTimeOffset.UtcNow, adminSessionTimeout))
+    var user = await UserAuth.Current(httpContext, db);
+    if (user is null)
     {
         return Results.Unauthorized();
     }
 
     var json = payload.GetRawText();
     var record = await db.AppStates.FirstOrDefaultAsync(item => item.Key == "default");
+    PaymentAudit.Record(db, record?.Json, json, user.Username);
 
     if (record is null)
     {
@@ -132,7 +165,15 @@ app.MapPut("/api/state", async (JsonElement payload, AppDbContext db, HttpContex
     return Results.NoContent();
 });
 
-app.MapPost("/api/presence", (JsonElement payload) =>
+app.MapGet("/api/payment-audit", async (HttpContext context, AppDbContext db) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    if (await UserAuth.Current(context, db) is null) return Results.Unauthorized();
+    var rows = await db.AppStates.AsNoTracking().Where(row => row.Key.StartsWith("audit:")).OrderByDescending(row => row.Id).ToListAsync();
+    return Results.Ok(rows.Select(row => JsonSerializer.Deserialize<JsonElement>(row.Json)));
+});
+
+app.MapPost("/api/presence", async (JsonElement payload, HttpContext context, AppDbContext db) =>
 {
     var viewerId = payload.TryGetProperty("viewerId", out var viewerIdProperty)
         ? viewerIdProperty.GetString()
@@ -144,12 +185,17 @@ app.MapPost("/api/presence", (JsonElement payload) =>
     }
 
     var now = DateTimeOffset.UtcNow;
+    var user = await UserAuth.Current(context, db);
+    viewerNames[viewerId] = user?.Username ?? "Visitante";
     activeViewers[viewerId] = now;
     RemoveExpiredViewers(activeViewers, now, viewerTimeout);
+    foreach (var id in viewerNames.Keys) if (!activeViewers.ContainsKey(id)) viewerNames.TryRemove(id, out _);
 
     return Results.Ok(new
     {
-        activeViewers = activeViewers.Count
+        activeViewers = activeViewers.Count,
+        sessionValid = user is not null,
+        viewers = activeViewers.Keys.OrderBy(id => id).Select(id => new { name = viewerNames.GetValueOrDefault(id, "Visitante") })
     });
 });
 
@@ -266,28 +312,6 @@ static void RemoveExpiredViewers(
             activeViewers.TryRemove(viewer.Key, out _);
         }
     }
-}
-
-static async Task<bool> IsAuthorizedAdmin(
-    HttpContext httpContext,
-    AppDbContext db,
-    DateTimeOffset now,
-    TimeSpan adminSessionTimeout)
-{
-    var token = AdminToken(httpContext);
-    if (string.IsNullOrWhiteSpace(token)) return false;
-    var key = SessionKey(token);
-    var session = await db.AppStates.FirstOrDefaultAsync(item => item.Key == key);
-    if (session is null) return false;
-    if (now - session.UpdatedAt > adminSessionTimeout)
-    {
-        db.AppStates.Remove(session);
-        await db.SaveChangesAsync();
-        return false;
-    }
-    session.UpdatedAt = now;
-    await db.SaveChangesAsync();
-    return true;
 }
 
 static string AdminToken(HttpContext context)

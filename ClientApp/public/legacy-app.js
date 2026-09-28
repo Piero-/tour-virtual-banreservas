@@ -41,12 +41,14 @@ let state = appState.categories[appState.activeCategory];
 let activeWeek = state.activeWeek || 1;
 let selectedTeamId = null;
 let apiSaveTimer = null;
+let apiSaveChain = Promise.resolve();
 let isArchivingSeason = false;
 let isApplyingRemoteState = false;
 let lastLocalSaveAt = 0;
 let lastKnownStateJson = JSON.stringify(appState);
 const viewerId = getViewerId();
 let adminToken = localStorage.getItem(ADMIN_TOKEN_KEY) || "";
+let currentUser = window.TOUR_USER || null;
 let adminView = localStorage.getItem("tour-admin-view") !== "viewer";
 
 const els = {
@@ -288,40 +290,79 @@ function syncCategoryRoute(category, { replace = false } = {}) {
   window.history[replace ? "replaceState" : "pushState"]({ category }, "", nextUrl);
 }
 
-function saveState() {
+function saveState(immediate = false) {
   state.activeWeek = activeWeek;
   appState.categories[appState.activeCategory] = state;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
   lastKnownStateJson = JSON.stringify(appState);
   if (!isApplyingRemoteState && isAdminMode()) {
     lastLocalSaveAt = Date.now();
-    queueApiSave();
+    queueApiSave(immediate);
   }
 }
 
-function queueApiSave() {
+function queueApiSave(immediate = false) {
   if (!window.fetch || !API_STATE_URL || !isAdminMode()) return;
   window.clearTimeout(apiSaveTimer);
-  apiSaveTimer = window.setTimeout(() => {
+  const send = () => {
     apiSaveTimer = null;
-    fetch(API_STATE_URL, {
+    const snapshot = JSON.stringify(appState);
+    const token = adminToken;
+    apiSaveChain = apiSaveChain.then(() => fetch(API_STATE_URL, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${adminToken}`,
+        Authorization: `Bearer ${token}`,
       },
-      body: JSON.stringify(appState),
-    })
+      body: snapshot,
+    }))
       .then((response) => {
         if (response.status === 401) {
           logoutAdmin();
           return;
         }
-        lastKnownStateJson = JSON.stringify(appState);
+        if (!response.ok) throw new Error("No se pudo guardar el cambio");
+        lastKnownStateJson = snapshot;
+        refreshPaymentAudit();
       })
       .catch((error) => console.warn("No se pudo guardar en el backend", error));
-  }, 350);
+  };
+  if (immediate) send();
+  else apiSaveTimer = window.setTimeout(send, 350);
 }
+
+async function refreshPaymentAudit() {
+  const panel = document.querySelector("#paymentAudit");
+  if (!panel?.open || !isAdminMode()) return;
+  const category = appState.activeCategory;
+  const container = document.querySelector("#paymentAuditEntries");
+  try {
+    const response = await fetch(API_STATE_URL.replace(/\/state$/, "/payment-audit"), {
+      headers: { Authorization: `Bearer ${adminToken}` }, cache: "no-store",
+    });
+    if (!response.ok) throw new Error("audit");
+    const entries = (await response.json()).filter(entry => entry.category === category);
+    if (category !== appState.activeCategory || !isAdminMode()) return;
+    container.replaceChildren();
+    if (!entries.length) container.textContent = "Todavía no hay cambios de pagos registrados.";
+    for (const entry of entries) {
+      const row = document.createElement("div");
+      row.className = "payment-audit-entry";
+      const description = document.createElement("span");
+      description.textContent = `${entry.username} ${entry.paid ? "marcó" : "desmarcó"} el pago · ${entry.teamName} · ${entry.payment}`;
+      const time = document.createElement("time");
+      time.dateTime = entry.timestamp;
+      time.textContent = new Date(entry.timestamp).toLocaleString("es-DO", { dateStyle: "medium", timeStyle: "medium" });
+      row.append(description, time);
+      container.append(row);
+    }
+  } catch {
+    container.textContent = "No se pudo cargar la auditoría. Vuelve a desplegarla para reintentar.";
+  }
+}
+
+document.querySelector("#paymentAudit")?.addEventListener("toggle", refreshPaymentAudit);
+window.setInterval(refreshPaymentAudit, SYNC_POLL_INTERVAL_MS);
 
 function isAdminMode() {
   return Boolean(adminToken) && adminView;
@@ -342,6 +383,8 @@ function updateAccessUi() {
   }
   const signOutButton = document.querySelector("#signOutButton");
   if (signOutButton) signOutButton.hidden = !adminToken;
+  const manageUsersButton = document.querySelector("#manageUsersButton");
+  if (manageUsersButton) manageUsersButton.hidden = !adminToken || currentUser?.username !== "piero";
 
   [els.teamCountInput, els.weekLimitInput, els.finalDonationInput].forEach((input) => {
     if (input) input.disabled = !isAdmin;
@@ -362,7 +405,7 @@ function openAdminLoginModal() {
   els.authError.hidden = true;
   els.adminPasswordInput.value = "";
   els.adminLoginModal.hidden = false;
-  els.adminPasswordInput.focus();
+  document.querySelector("#adminUsernameInput").focus();
 }
 
 function closeAdminLoginModal() {
@@ -380,7 +423,7 @@ async function submitAdminLogin() {
     const response = await fetch(API_AUTH_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password: els.adminPasswordInput.value }),
+      body: JSON.stringify({ username: document.querySelector("#adminUsernameInput").value.trim(), password: els.adminPasswordInput.value }),
     });
 
     if (!response.ok) {
@@ -390,12 +433,15 @@ async function submitAdminLogin() {
 
     const payload = await response.json();
     adminToken = payload.token || "";
+    currentUser = { username: payload.username, canManageUsers: payload.canManageUsers };
+    els.adminPasswordInput.value = "";
     adminView = true;
     localStorage.setItem("tour-admin-view", "admin");
     localStorage.setItem(ADMIN_TOKEN_KEY, adminToken);
     closeAdminLoginModal();
     updateAccessUi();
     render();
+    sendPresenceHeartbeat();
   } catch {
     els.authError.hidden = false;
   } finally {
@@ -407,6 +453,9 @@ function logoutAdmin() {
   window.clearTimeout(apiSaveTimer);
   apiSaveTimer = null;
   adminToken = "";
+  currentUser = null;
+  const usersModal = document.querySelector("#usersModal");
+  if (usersModal) usersModal.hidden = true;
   localStorage.removeItem("tour-admin-view");
   localStorage.removeItem(ADMIN_TOKEN_KEY);
   closeActionMenus();
@@ -477,32 +526,42 @@ function getViewerId() {
 async function sendPresenceHeartbeat() {
   if (!window.fetch || !API_PRESENCE_URL || !els.presenceDots) return;
 
+  const heartbeatToken = adminToken;
   try {
     const response = await fetch(API_PRESENCE_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(heartbeatToken ? { Authorization: `Bearer ${heartbeatToken}` } : {}) },
       body: JSON.stringify({ viewerId }),
       keepalive: true,
     });
 
     if (!response.ok) return;
     const payload = await response.json();
-    renderPresenceDots(Number(payload.activeViewers) || 1);
+    if (heartbeatToken && heartbeatToken === adminToken && payload.sessionValid === false) {
+      logoutAdmin();
+      showToast("Tu sesión terminó. Inicia sesión con tu contraseña actual.", "error");
+    }
+    renderPresenceDots(Number(payload.activeViewers) || 1, payload.viewers || []);
   } catch (error) {
     console.warn("No se pudo actualizar la presencia en vivo", error);
   }
 }
 
-function renderPresenceDots(count) {
+function renderPresenceDots(count, viewers = []) {
   if (!els.presenceDots) return;
 
   const visibleDots = Math.min(count, PRESENCE_MAX_DOTS);
   els.presenceDots.innerHTML = "";
   els.presenceDots.title = `${count} persona${count === 1 ? "" : "s"} viendo en vivo`;
 
-  Array.from({ length: visibleDots }).forEach(() => {
+  Array.from({ length: visibleDots }).forEach((_, index) => {
     const dot = document.createElement("span");
     dot.className = "presence-dot";
+    const name = viewers[index]?.name || "Visitante";
+    dot.title = name;
+    dot.setAttribute("aria-label", `${name} viendo en vivo`);
+    dot.setAttribute("data-name", name);
+    dot.tabIndex = 0;
     els.presenceDots.append(dot);
   });
 
@@ -2161,7 +2220,7 @@ function handlePaymentChange(event) {
   renderPayments();
   renderReport();
   renderPrizeSubtitle();
-  saveState();
+  saveState(true);
 }
 
 function handlePaymentClick(event) {
@@ -2253,6 +2312,50 @@ document.querySelector("#signOutButton")?.addEventListener("click", async (event
 });
 
 els.cancelLoginButton.addEventListener("click", closeAdminLoginModal);
+document.querySelector("#adminUsernameInput")?.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") els.adminPasswordInput.focus();
+});
+
+document.querySelector("#manageUsersButton")?.addEventListener("click", () => {
+  if (!adminToken || currentUser?.username !== "piero") return;
+  document.querySelector("#managedPassword").value = "";
+  document.querySelector("#usersError").hidden = true;
+  document.querySelector("#usersModal").hidden = false;
+  document.querySelector("#managedUsername").focus();
+});
+function closeUsersModal() {
+  document.querySelector("#usersModal").hidden = true;
+  document.querySelector("#managedPassword").value = "";
+}
+document.querySelector("#closeUsersButton")?.addEventListener("click", closeUsersModal);
+document.querySelector("#usersModal")?.addEventListener("click", (event) => {
+  if (event.target.id === "usersModal") closeUsersModal();
+});
+document.querySelector("#usersForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  if (!adminToken || currentUser?.username !== "piero") return;
+  const username = document.querySelector("#managedUsername").value.trim().toLowerCase();
+  const passwordInput = document.querySelector("#managedPassword");
+  const button = document.querySelector("#saveUserButton");
+  const error = document.querySelector("#usersError");
+  button.disabled = true;
+  error.hidden = true;
+  try {
+    const response = await fetch(API_STATE_URL.replace(/\/state$/, `/users/${encodeURIComponent(username)}/password`), {
+      method: "PUT", headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ password: passwordInput.value }),
+    });
+    if (response.status === 401) { logoutAdmin(); return; }
+    if (!response.ok) throw new Error("No se pudo cambiar la contraseña.");
+    closeUsersModal();
+    if (username === currentUser.username) logoutAdmin();
+    showToast(`Contraseña de ${username} actualizada. Sesiones cerradas.`);
+    sendPresenceHeartbeat();
+  } catch {
+    error.textContent = "No se pudo cambiar la contraseña. Intenta de nuevo.";
+    error.hidden = false;
+  } finally { button.disabled = false; }
+});
 els.submitLoginButton.addEventListener("click", submitAdminLogin);
 els.adminLoginModal.addEventListener("click", (event) => {
   if (event.target === els.adminLoginModal) closeAdminLoginModal();
@@ -2277,6 +2380,7 @@ document.addEventListener("keydown", (event) => {
     closeActionMenus();
     closeFinalFeeModal();
     closeAdminLoginModal();
+    closeUsersModal();
   }
 });
 
