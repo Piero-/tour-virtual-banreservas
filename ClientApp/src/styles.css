@@ -2940,3 +2940,88 @@ th,
     padding: 5px;
   }
 }
+
+html {
+  background: #101a16;
+  color-scheme: dark;
+  min-height: 100%;
+}
+
+body {
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+    env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+
+.session-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.session-actions button {
+  min-height: 44px;
+  white-space: nowrap;
+  font-size: 0.8rem;
+}
+
+.sign-out-button {
+  border: 1px solid #9d4b4b;
+  border-radius: 8px;
+  padding: 8px 12px;
+  background: #562727;
+  color: #ffe1dc;
+  cursor: pointer;
+}
+
+.sign-out-button:hover { background: #713333; }
+.sign-out-button:focus-visible { outline: 2px solid #ffb4a8; outline-offset: 3px; }
+.sign-out-button[hidden] { display: none; }
+
+.splash-screen {
+  min-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+}
+
+.modal-backdrop {
+  padding-top: max(20px, env(safe-area-inset-top, 0px));
+  padding-bottom: max(20px, env(safe-area-inset-bottom, 0px));
+}
+
+.toast { bottom: calc(24px + env(safe-area-inset-bottom, 0px)); }
+
+.payment-team-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.payment-team-name {
+  width: auto;
+  flex: none;
+  min-width: 0;
+  padding: 3px 8px;
+  border: 1px solid #2b3b32;
+  border-radius: 999px;
+  background: #1c2b23;
+  color: #b8c1b9;
+  font-size: 13px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+}
+
+.payment-team-name::placeholder { color: #99a69c; }
+
+.payment-table th:first-child,
+.payment-table td:first-child {
+  width: 1%;
+  min-width: 0;
+  max-width: none;
+}
+
+.payment-team-name:focus {
+  background: #22372b;
+  outline: 2px solid #648674;
+  outline-offset: 2px;
+}

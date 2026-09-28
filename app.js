@@ -12,9 +12,11 @@ const MEDAL_TONES = ["gold", "silver", "bronze"];
 const LOGO_SRC = "/assets/pnglogo.png";
 const CATEGORY_ROUTES = {
   A: "/tour-a",
+  C: "/tour-c",
 };
 const CATEGORY_LABELS = {
   A: "A, B y C",
+  C: "C",
 };
 const PAYMENT_DEFAULTS_VERSION = 2;
 const API_STATE_URL = window.TOUR_API_STATE_URL || "/api/state";
@@ -45,6 +47,7 @@ let lastLocalSaveAt = 0;
 let lastKnownStateJson = JSON.stringify(appState);
 const viewerId = getViewerId();
 let adminToken = localStorage.getItem(ADMIN_TOKEN_KEY) || "";
+let adminView = localStorage.getItem("tour-admin-view") !== "viewer";
 
 const els = {
   categorySelect: document.querySelector("#categorySelect"),
@@ -142,6 +145,7 @@ function normalizeCategoryState(saved = {}) {
     name: normalizeSavedTeamName(saved.teams?.[index]?.name, index),
     captain: normalizeSavedCaptain(saved.teams?.[index]?.captain),
     members: normalizeTeamMembers(saved.teams?.[index]?.members),
+    paymentName: String(saved.teams?.[index]?.paymentName ?? "").slice(0, 80),
   }));
 
   return createCategoryState({
@@ -236,6 +240,7 @@ function normalizeAppStatePayload(saved) {
       archives,
       categories: {
         A: createCategoryState(),
+        C: createCategoryState(),
       },
     };
   }
@@ -246,6 +251,7 @@ function normalizeAppStatePayload(saved) {
       archives,
       categories: {
         A: normalizeCategoryState(saved.categories.A),
+        C: normalizeCategoryState(saved.categories.C),
       },
     };
   }
@@ -255,6 +261,7 @@ function normalizeAppStatePayload(saved) {
     archives,
     categories: {
       A: normalizeCategoryState(saved),
+      C: createCategoryState(),
     },
   };
 }
@@ -262,6 +269,7 @@ function normalizeAppStatePayload(saved) {
 function categoryFromPath(pathname = window.location.pathname) {
   const normalizedPath = String(pathname || "").replace(/\/+$/, "") || "/";
   if (normalizedPath === CATEGORY_ROUTES.A) return "A";
+  if (normalizedPath === CATEGORY_ROUTES.C) return "C";
   return null;
 }
 
@@ -316,7 +324,7 @@ function queueApiSave() {
 }
 
 function isAdminMode() {
-  return Boolean(adminToken);
+  return Boolean(adminToken) && adminView;
 }
 
 function requireAdmin() {
@@ -329,9 +337,11 @@ function updateAccessUi() {
   document.body.classList.toggle("is-admin", isAdmin);
 
   if (els.loginButton) {
-    els.loginButton.textContent = isAdmin ? "Admin" : "Login";
-    els.loginButton.title = isAdmin ? "Cerrar modo edición" : "Entrar a modo edición";
+    els.loginButton.textContent = adminToken ? (isAdmin ? "Vista pública" : "Vista admin") : "Login";
+    els.loginButton.title = adminToken ? "Cambiar vista sin cerrar sesión" : "Entrar a modo edición";
   }
+  const signOutButton = document.querySelector("#signOutButton");
+  if (signOutButton) signOutButton.hidden = !adminToken;
 
   [els.teamCountInput, els.weekLimitInput, els.finalDonationInput].forEach((input) => {
     if (input) input.disabled = !isAdmin;
@@ -380,6 +390,8 @@ async function submitAdminLogin() {
 
     const payload = await response.json();
     adminToken = payload.token || "";
+    adminView = true;
+    localStorage.setItem("tour-admin-view", "admin");
     localStorage.setItem(ADMIN_TOKEN_KEY, adminToken);
     closeAdminLoginModal();
     updateAccessUi();
@@ -392,7 +404,10 @@ async function submitAdminLogin() {
 }
 
 function logoutAdmin() {
+  window.clearTimeout(apiSaveTimer);
+  apiSaveTimer = null;
   adminToken = "";
+  localStorage.removeItem("tour-admin-view");
   localStorage.removeItem(ADMIN_TOKEN_KEY);
   closeActionMenus();
   selectedTeamId = null;
@@ -697,11 +712,12 @@ function renderSeasonArchives() {
   const list = document.querySelector("#seasonArchiveList");
   if (!list) return;
   list.replaceChildren();
-  if (!appState.archives.length) {
+  const categoryArchives = appState.archives.filter((archive) => (archive.categoryId || "A") === appState.activeCategory);
+  if (!categoryArchives.length) {
     list.textContent = "Todavía no hay temporadas archivadas.";
     return;
   }
-  for (const archive of [...appState.archives].reverse()) {
+  for (const archive of [...categoryArchives].reverse()) {
     const details = document.createElement("details");
     details.className = "season-archive";
     const summary = document.createElement("summary");
@@ -743,7 +759,7 @@ async function archiveCurrentSeason() {
   apiSaveTimer = null;
   const archive = {
     id: crypto.randomUUID(), name: name.slice(0, 100), archivedAt: new Date().toISOString(),
-    category: categoryLabel(), snapshot: structuredClone(state),
+    category: categoryLabel(), categoryId: appState.activeCategory, snapshot: structuredClone(state),
     inscriptionFee: INSCRIPTION_FEE_DOP, inscriptionFinalPool: INSCRIPTION_FINAL_POOL_DOP,
     regularFee: REGULAR_WEEK_FEE_DOP,
     weeks: state.weeks.slice(0, state.weekLimit).map((week) => ({ name: weekDisplayName(week), pool: prizePool(week), doublePoints: isDoublePointsWeek(week) })),
@@ -785,7 +801,7 @@ async function archiveCurrentSeason() {
 document.querySelector("#archiveSeasonButton")?.addEventListener("click", archiveCurrentSeason);
 
 function switchCategory(category, { updateRoute = true } = {}) {
-  if (category !== "A" || category === appState.activeCategory) return;
+  if (!Object.hasOwn(CATEGORY_ROUTES, category) || category === appState.activeCategory) return;
   saveState();
   appState.activeCategory = category;
   state = appState.categories[category];
@@ -1328,7 +1344,9 @@ function renderPayments() {
 
       return `
         <tr>
-          <td>${escapeHtml(team.name)}</td>
+          <td><div class="payment-team-label"><span>${escapeHtml(team.name)}</span>${isAdminMode()
+            ? `<input class="payment-team-name" type="text" maxlength="80" placeholder="Agregar nombre" title="Editar nombre" data-team-id="${team.id}" value="${escapeHtml(team.paymentName || "")}" aria-label="Nombre en pagos de ${escapeHtml(team.name)}" />`
+            : ""}</div></td>
           <td><input class="payment-check" type="checkbox" data-payment-type="inscription" data-team-id="${team.id}" ${
             inscriptionPaid.has(team.id) ? "checked" : ""
           } aria-label="${escapeHtml(team.name)} pagó inscripción" /></td>
@@ -1351,6 +1369,15 @@ function renderPayments() {
     totalPaid,
   )}`;
   els.paymentTable.innerHTML = `${header}<tbody>${body}</tbody>`;
+  els.paymentTable.querySelectorAll(".payment-team-name").forEach(sizePaymentName);
+}
+
+function sizePaymentName(input) {
+  const context = document.createElement("canvas").getContext("2d");
+  const style = getComputedStyle(input);
+  context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+  const padding = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+  input.style.width = `${Math.ceil(context.measureText(input.value || input.placeholder).width + padding + 6)}px`;
 }
 
 function isFinalsWeek(week) {
@@ -2105,6 +2132,16 @@ function saveFinalFee() {
 
 function handlePaymentChange(event) {
   if (!requireAdmin()) return;
+  const nameInput = event.target.closest(".payment-team-name");
+  if (nameInput) {
+    const team = getActiveTeams().find((item) => item.id === nameInput.dataset.teamId);
+    if (!team) return;
+    team.paymentName = nameInput.value.trim().slice(0, 80);
+    nameInput.value = team.paymentName;
+    sizePaymentName(nameInput);
+    saveState();
+    return;
+  }
   const checkbox = event.target.closest(".payment-check");
   if (!checkbox) return;
 
@@ -2165,6 +2202,19 @@ els.finalDonationInput.addEventListener("input", handleFinalDonationChange);
 els.finalDonationInput.addEventListener("change", handleFinalDonationChange);
 els.showWeeksButton.addEventListener("click", showAllWeeks);
 els.paymentTable.addEventListener("change", handlePaymentChange);
+els.paymentTable.addEventListener("input", (event) => {
+  if (event.target.matches(".payment-team-name")) sizePaymentName(event.target);
+});
+els.paymentTable.addEventListener("keydown", (event) => {
+  if (!event.target.matches(".payment-team-name")) return;
+  if (event.key === "Enter") { event.preventDefault(); event.target.blur(); }
+  if (event.key === "Escape") {
+    const team = getActiveTeams().find((item) => item.id === event.target.dataset.teamId);
+    if (team) event.target.value = team.paymentName || "";
+    sizePaymentName(event.target);
+    event.target.blur();
+  }
+});
 els.paymentTable.addEventListener("click", handlePaymentClick);
 
 els.cancelFinalFeeButton.addEventListener("click", closeFinalFeeModal);
@@ -2178,11 +2228,28 @@ els.finalFeeModalInput.addEventListener("keydown", (event) => {
 });
 
 els.loginButton.addEventListener("click", () => {
-  if (isAdminMode()) {
-    logoutAdmin();
+  if (adminToken) {
+    adminView = !adminView;
+    localStorage.setItem("tour-admin-view", adminView ? "admin" : "viewer");
+    render();
   } else {
     openAdminLoginModal();
   }
+});
+
+document.querySelector("#signOutButton")?.addEventListener("click", async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const response = await fetch(API_AUTH_URL.replace(/\/login$/, "/logout"), {
+      method: "POST", headers: { Authorization: `Bearer ${adminToken}` },
+    });
+    if (!response.ok && response.status !== 401) throw new Error("Sign out failed");
+    logoutAdmin();
+    showToast("Sesión cerrada");
+  } catch {
+    showToast("No se pudo cerrar la sesión. Intenta de nuevo.", "error");
+  } finally { button.disabled = false; }
 });
 
 els.cancelLoginButton.addEventListener("click", closeAdminLoginModal);

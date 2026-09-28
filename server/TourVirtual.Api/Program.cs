@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
 using TourVirtual.Api.Data;
@@ -7,9 +9,8 @@ using TourVirtual.Api.Models;
 
 var builder = WebApplication.CreateBuilder(args);
 var activeViewers = new ConcurrentDictionary<string, DateTimeOffset>();
-var activeAdminSessions = new ConcurrentDictionary<string, DateTimeOffset>();
 var viewerTimeout = TimeSpan.FromSeconds(35);
-var adminSessionTimeout = TimeSpan.FromHours(12);
+var adminSessionTimeout = TimeSpan.FromDays(30);
 var adminPassword = Environment.GetEnvironmentVariable("ADMIN_PASSWORD") ?? "hoyo2010";
 
 var port = Environment.GetEnvironmentVariable("PORT");
@@ -69,7 +70,7 @@ app.MapGet("/api/state", async (AppDbContext db) =>
     return Results.Text(record?.Json ?? "null", "application/json");
 });
 
-app.MapPost("/api/auth/login", (JsonElement payload) =>
+app.MapPost("/api/auth/login", async (JsonElement payload, AppDbContext db) =>
 {
     var password = payload.TryGetProperty("password", out var passwordProperty)
         ? passwordProperty.GetString()
@@ -80,18 +81,35 @@ app.MapPost("/api/auth/login", (JsonElement payload) =>
         return Results.Unauthorized();
     }
 
-    var token = Convert.ToBase64String(Guid.NewGuid().ToByteArray())
+    var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32))
         .Replace("+", "-", StringComparison.Ordinal)
         .Replace("/", "_", StringComparison.Ordinal)
         .TrimEnd('=');
 
-    activeAdminSessions[token] = DateTimeOffset.UtcNow;
+    db.AppStates.Add(new AppStateRecord { Key = SessionKey(token), Json = "{}" });
+    await db.SaveChangesAsync();
     return Results.Ok(new { token });
+});
+
+app.MapGet("/api/auth/session", async (HttpContext context, AppDbContext db) =>
+    await IsAuthorizedAdmin(context, db, DateTimeOffset.UtcNow, adminSessionTimeout)
+        ? Results.NoContent() : Results.Unauthorized());
+
+app.MapPost("/api/auth/logout", async (HttpContext context, AppDbContext db) =>
+{
+    var key = SessionKey(AdminToken(context));
+    var session = await db.AppStates.FirstOrDefaultAsync(item => item.Key == key);
+    if (session is not null)
+    {
+        db.AppStates.Remove(session);
+        await db.SaveChangesAsync();
+    }
+    return Results.NoContent();
 });
 
 app.MapPut("/api/state", async (JsonElement payload, AppDbContext db, HttpContext httpContext) =>
 {
-    if (!IsAuthorizedAdmin(httpContext, activeAdminSessions, DateTimeOffset.UtcNow, adminSessionTimeout))
+    if (!await IsAuthorizedAdmin(httpContext, db, DateTimeOffset.UtcNow, adminSessionTimeout))
     {
         return Results.Unauthorized();
     }
@@ -250,30 +268,33 @@ static void RemoveExpiredViewers(
     }
 }
 
-static bool IsAuthorizedAdmin(
+static async Task<bool> IsAuthorizedAdmin(
     HttpContext httpContext,
-    ConcurrentDictionary<string, DateTimeOffset> activeAdminSessions,
+    AppDbContext db,
     DateTimeOffset now,
     TimeSpan adminSessionTimeout)
 {
-    var header = httpContext.Request.Headers.Authorization.ToString();
-    const string bearerPrefix = "Bearer ";
-    var token = header.StartsWith(bearerPrefix, StringComparison.OrdinalIgnoreCase)
-        ? header[bearerPrefix.Length..].Trim()
-        : httpContext.Request.Headers["X-Admin-Token"].ToString();
-
-    if (string.IsNullOrWhiteSpace(token)
-        || !activeAdminSessions.TryGetValue(token, out var lastSeen)
-        || now - lastSeen > adminSessionTimeout)
+    var token = AdminToken(httpContext);
+    if (string.IsNullOrWhiteSpace(token)) return false;
+    var key = SessionKey(token);
+    var session = await db.AppStates.FirstOrDefaultAsync(item => item.Key == key);
+    if (session is null) return false;
+    if (now - session.UpdatedAt > adminSessionTimeout)
     {
-        if (!string.IsNullOrWhiteSpace(token))
-        {
-            activeAdminSessions.TryRemove(token, out _);
-        }
-
+        db.AppStates.Remove(session);
+        await db.SaveChangesAsync();
         return false;
     }
-
-    activeAdminSessions[token] = now;
+    session.UpdatedAt = now;
+    await db.SaveChangesAsync();
     return true;
 }
+
+static string AdminToken(HttpContext context)
+{
+    var header = context.Request.Headers.Authorization.ToString();
+    return header.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase)
+        ? header[7..].Trim() : context.Request.Headers["X-Admin-Token"].ToString();
+}
+
+static string SessionKey(string token) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token)));

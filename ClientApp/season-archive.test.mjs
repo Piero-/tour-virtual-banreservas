@@ -70,6 +70,22 @@ test("Archived seasons survive state normalization", () => {
   assert.equal(restored.archives[0].id, "old");
 });
 
+test("Category C retains its independent data without replacing the existing tour", () => {
+  const context = setup();
+  context.categoryFromPath = () => "C";
+  context.normalizeCategoryState = (value) => value || { teams: [] };
+  vm.runInContext(functionSource("normalizeAppStatePayload"), context);
+  const restored = context.normalizeAppStatePayload({ categories: {
+    A: { teams: [{ name: "Original" }] }, C: { teams: [{ name: "Category C" }] },
+  } });
+  assert.equal(restored.activeCategory, "C");
+  assert.equal(restored.categories.A.teams[0].name, "Original");
+  assert.equal(restored.categories.C.teams[0].name, "Category C");
+  const migrated = context.normalizeAppStatePayload({ categories: { A: { teams: [{ name: "Original" }] } } });
+  assert.equal(migrated.categories.A.teams[0].name, "Original");
+  assert.equal(migrated.categories.C.teams.length, 0);
+});
+
 test("PDF supports 12 teams, long names and all 11 weeks", () => {
   const archive = {
     name: "Temporada de prueba", category: "A, B y C", archivedAt: "2026-09-22T00:00:00Z",

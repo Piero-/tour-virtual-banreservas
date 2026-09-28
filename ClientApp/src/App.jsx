@@ -13,6 +13,15 @@ export default function App() {
     let cancelled = false;
 
     async function boot() {
+      const token = localStorage.getItem("tour-admin-token");
+      if (token) {
+        try {
+          const session = await fetch(`${API_BASE_URL}/api/auth/session`, {
+            headers: { Authorization: `Bearer ${token}` }, cache: "no-store",
+          });
+          if (session.status === 401) localStorage.removeItem("tour-admin-token");
+        } catch { /* Keep the saved session when the server is temporarily unavailable. */ }
+      }
       try {
         const response = await fetch(API_STATE_URL);
         if (response.ok) {
@@ -44,7 +53,7 @@ export default function App() {
       const { downloadSeasonPdf } = await import("./season-pdf");
       return downloadSeasonPdf(archive);
     };
-    script.src = "/legacy-app.js?v=20260922-copper-report-gradient";
+    script.src = "/legacy-app.js?v=20260928-payment-content-width";
     script.async = false;
     document.body.appendChild(script);
   }, [ready]);
@@ -95,6 +104,7 @@ export default function App() {
               <span>Categoría</span>
               <select id="categorySelect">
                 <option value="A">A, B y C</option>
+                <option value="C">C</option>
               </select>
             </label>
             <label className="field compact admin-only">
@@ -126,7 +136,10 @@ export default function App() {
               </div>
             </details>
             <div id="presenceDots" className="presence-dots" aria-label="Personas viendo en vivo"></div>
-            <button id="loginButton" className="login-button" type="button">Login</button>
+            <div className="session-actions">
+              <button id="loginButton" className="login-button" type="button">Login</button>
+              <button id="signOutButton" className="sign-out-button" type="button" hidden>Cerrar sesión</button>
+            </div>
           </div>
         </header>
 
