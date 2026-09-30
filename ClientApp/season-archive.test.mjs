@@ -5,11 +5,54 @@ import vm from "node:vm";
 import { createSeasonPdf } from "./src/season-pdf.js";
 
 const source = readFileSync(new URL("../app.js", import.meta.url), "utf8");
+test("Last three holes survive JSON storage and invalid scores default to par", () => {
+  const context = vm.createContext({ defaultTeams: [{ id: "team-1" }, { id: "team-2" }] });
+  vm.runInContext(functionSource("normalizeHoleScores"), context);
+  const saved = JSON.parse(JSON.stringify({ "team-1": { 18: -3, 17: 2, 16: -1 }, "team-2": { 18: 99 } }));
+  const restored = context.normalizeHoleScores(saved);
+  assert.equal(restored["team-1"][18], -3);
+  assert.equal(restored["team-1"][17], 2);
+  assert.equal(restored["team-1"][16], -1);
+  assert.equal(restored["team-2"][18], 0);
+  assert.equal(restored["team-2"][17], 0);
+  assert.equal(Object.keys(context.normalizeHoleScores(null)).length, 0);
+});
 function functionSource(name) {
   const start = source.indexOf(`function ${name}(`);
   const end = source.indexOf("\n}", start) + 2;
   return (source.slice(start - 6, start) === "async " ? "async " : "") + source.slice(start, end);
 }
+
+test("Countback compares 18 then 17 then 16, with manual ranks only for identical holes", () => {
+  const teams = ["a", "b", "c", "d"].map(id => ({ id, name: id }));
+  const context = vm.createContext({
+    getActiveTeams: () => teams, getActiveTeamIds: () => new Set(teams.map(t => t.id)), MAX_TEAMS: 12,
+  });
+  for (const name of ["normalizeGolfScore", "golfScoreSortValue", "tiedTeamIdsForScore", "compareLastHoles", "unresolvedTiedTeamIds", "pruneScoreTiebreaks", "syncPlacementsFromScores"])
+    vm.runInContext(functionSource(name), context);
+  const week = {
+    scores: { a: "-8", b: "-8", c: "-8", d: "-8" }, placements: ["d", "c", "b", "a"],
+    holeScores: {
+      a: { 18: -1, 17: -1, 16: -1 }, b: { 18: -1, 17: -1, 16: 0 },
+      c: { 18: 0, 17: -3, 16: -3 }, d: { 18: -1, 17: -1, 16: -1 },
+    }, scoreTiebreaks: { d: 1, a: 2, c: 1 },
+  };
+  context.pruneScoreTiebreaks(week);
+  context.syncPlacementsFromScores(week);
+  assert.equal(week.placements.slice(0, 4).join(","), "d,a,b,c");
+  assert.equal(context.unresolvedTiedTeamIds(week, "b").length, 1);
+  assert.equal(context.unresolvedTiedTeamIds(week, "a").length, 2);
+  assert.equal(week.scoreTiebreaks.c, undefined);
+  week.holeScores.d[17] = 0;
+  context.pruneScoreTiebreaks(week);
+  context.syncPlacementsFromScores(week);
+  assert.equal(week.placements.slice(0, 4).join(","), "a,b,d,c");
+  assert.equal(Object.keys(week.scoreTiebreaks).length, 0);
+  week.scores.c = "-9";
+  context.syncPlacementsFromScores(week);
+  assert.equal(week.placements[0], "c");
+  assert.equal(context.compareLastHoles({}, "a", "b"), 0);
+});
 function setup(ok = true) {
   const team = { id: "team-1", name: "Equipo original", members: { A: "Ana", B: "Luis", C: "Luz" } };
   const state = { teams: [team], teamCount: 1, weekLimit: 1, finalWeekFee: 9000, inscriptionPaidTeamIds: [team.id], weeks: [{ week: 1, paidTeamIds: [team.id] }] };

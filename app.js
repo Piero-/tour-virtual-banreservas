@@ -119,6 +119,7 @@ function createCategoryState(overrides = {}) {
       paidTeamIds: [],
       placements: Array(MAX_TEAMS).fill(null),
       scores: {},
+      holeScores: {},
       scoreTiebreaks: {},
     })),
     ...overrides,
@@ -138,6 +139,7 @@ function normalizeCategoryState(saved = {}) {
         return typeof teamId === "string" ? teamId : null;
       }),
       scores: normalizeScores(savedWeek.scores),
+      holeScores: normalizeHoleScores(savedWeek.holeScores),
       scoreTiebreaks: normalizeScoreTiebreaks(savedWeek.scoreTiebreaks),
     };
   });
@@ -197,6 +199,13 @@ function normalizeScores(savedScores) {
       .filter(([teamId, score]) => validIds.has(teamId) && normalizeGolfScore(score))
       .map(([teamId, score]) => [teamId, normalizeGolfScore(score)]),
   );
+}
+
+function normalizeHoleScores(saved) {
+  return Object.fromEntries(defaultTeams.filter(team => saved?.[team.id]).map(team => [team.id,
+    Object.fromEntries([18, 17, 16].map(hole => [hole,
+      [2, 1, 0, -1, -2, -3].includes(saved[team.id][hole]) ? saved[team.id][hole] : 0])),
+  ]));
 }
 
 function normalizeScoreTiebreaks(savedTiebreaks) {
@@ -510,7 +519,8 @@ function isUserActivelyEditing() {
   return ["INPUT", "SELECT", "TEXTAREA"].includes(activeElement.tagName)
     || activeElement.isContentEditable
     || selectedTeamId !== null
-    || !els.finalFeeModal.hidden;
+    || !els.finalFeeModal.hidden
+    || Boolean(document.querySelector(".hole-score-modal[open]"));
 }
 
 function getViewerId() {
@@ -1079,6 +1089,7 @@ function createScoreControl(week, teamId) {
 
   label.append(input);
   stack.append(label);
+  stack.append(createHoleScoreControl(week, teamId));
   const tiebreak = createTiebreakControl(week, teamId);
   if (tiebreak) stack.append(tiebreak);
   return stack;
@@ -1106,13 +1117,117 @@ function createPoolScoreControl(week, teamId) {
   });
 
   label.append(input);
-  return label;
+  const stack = document.createElement("div");
+  stack.className = "pool-score-stack";
+  stack.append(label, createHoleScoreControl(week, teamId));
+  return stack;
+}
+
+const HOLE_OPTIONS = [
+  { value: 2, label: "D. Bogey (+2)" }, { value: 1, label: "Bogey (+1)" },
+  { value: 0, label: "Par (E)" }, { value: -1, label: "Birdie (-1)" },
+  { value: -2, label: "Eagle (-2)" }, { value: -3, label: "Albatross (-3)" },
+];
+
+function createHoleScoreControl(week, teamId) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "hole-score-summary";
+  button.setAttribute("aria-label", `Últimos tres hoyos de ${getTeam(teamId)?.name || "equipo"}`);
+  for (const hole of [18, 17, 16]) {
+    const value = week.holeScores?.[teamId]?.[hole] || 0;
+    const item = document.createElement("span");
+    item.append(`${hole} `);
+    const score = document.createElement("strong");
+    score.textContent = value === 0 ? "E" : value > 0 ? `+${value}` : String(value);
+    item.append(score);
+    button.append(item);
+  }
+  button.addEventListener("click", event => {
+    event.stopPropagation();
+    if (requireAdmin()) openHoleScores(week, teamId, button);
+  });
+  return button;
+}
+
+function openHoleScores(week, teamId, trigger) {
+  const modal = document.createElement("dialog");
+  modal.className = "hole-score-modal";
+  modal.setAttribute("aria-labelledby", "holeScoreTitle");
+  const title = document.createElement("h2");
+  title.id = "holeScoreTitle";
+  title.textContent = getTeam(teamId)?.name || "Equipo";
+  modal.append(title);
+  const wheels = [];
+  for (const hole of [18, 17, 16]) {
+    const label = document.createElement("h3");
+    label.textContent = `Hoyo ${hole}`;
+    const wheel = document.createElement("div");
+    wheel.className = "hole-score-wheel";
+    wheel.tabIndex = 0;
+    wheel.setAttribute("role", "listbox");
+    wheel.setAttribute("aria-label", `Hoyo ${hole}`);
+    HOLE_OPTIONS.forEach((option, index) => {
+      const item = document.createElement("div");
+      item.id = `hole-${hole}-option-${index}`;
+      item.setAttribute("role", "option");
+      item.textContent = option.label;
+      item.addEventListener("click", () => wheel.scrollTo({ top: index * 40, behavior: "smooth" }));
+      wheel.append(item);
+    });
+    const selectedIndex = () => Math.max(0, Math.min(5, Math.round(wheel.scrollTop / 40)));
+    const update = () => {
+      const index = selectedIndex();
+      [...wheel.children].forEach((item, i) => item.setAttribute("aria-selected", String(i === index)));
+      wheel.setAttribute("aria-activedescendant", wheel.children[index].id);
+    };
+    wheel.addEventListener("scroll", update);
+    wheel.addEventListener("keydown", event => {
+      if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const index = event.key === "Home" ? 0 : event.key === "End" ? 5 : selectedIndex() + (event.key === "ArrowDown" ? 1 : -1);
+      wheel.scrollTo({ top: Math.max(0, Math.min(5, index)) * 40 });
+    });
+    modal.append(label, wheel);
+    wheels.push({ hole, wheel, update, selectedIndex });
+  }
+  const actions = document.createElement("div");
+  actions.className = "modal-actions";
+  const cancel = document.createElement("button");
+  cancel.className = "button secondary";
+  cancel.textContent = "Cancelar";
+  cancel.addEventListener("click", () => modal.close());
+  const save = document.createElement("button");
+  save.className = "button primary";
+  save.textContent = "Guardar";
+  save.addEventListener("click", () => {
+    if (!requireAdmin()) { modal.close(); return; }
+    week.holeScores ||= {};
+    week.holeScores[teamId] = Object.fromEntries(wheels.map(({hole, selectedIndex}) => [hole, HOLE_OPTIONS[selectedIndex()].value]));
+    pruneScoreTiebreaks(week);
+    syncPlacementsFromScores(week);
+    saveState(true);
+    renderPool();
+    renderPlacements();
+    renderStandings();
+    renderReport();
+    modal.close();
+  });
+  actions.append(cancel, save);
+  modal.append(actions);
+  modal.addEventListener("close", () => { modal.remove(); if (trigger.isConnected) trigger.focus(); });
+  document.body.append(modal);
+  modal.showModal();
+  wheels.forEach(({hole, wheel, update}) => {
+    wheel.scrollTop = HOLE_OPTIONS.findIndex(option => option.value === (week.holeScores?.[teamId]?.[hole] || 0)) * 40;
+    update();
+  });
 }
 
 function createTiebreakControl(week, teamId) {
   const score = normalizeGolfScore(week.scores?.[teamId]);
   if (!score) return null;
-  const tiedTeamIds = tiedTeamIdsForScore(week, score);
+  const tiedTeamIds = unresolvedTiedTeamIds(week, teamId);
   if (tiedTeamIds.length < 2) return null;
 
   const label = document.createElement("label");
@@ -1160,7 +1275,7 @@ function updateScoreTiebreak(week, teamId, rawRank) {
   const rank = Number(rawRank);
   if (Number.isInteger(rank) && rank > 0) {
     const score = normalizeGolfScore(week.scores?.[teamId]);
-    tiedTeamIdsForScore(week, score)
+    unresolvedTiedTeamIds(week, teamId)
       .filter((tiedTeamId) => tiedTeamId !== teamId && week.scoreTiebreaks?.[tiedTeamId] === rank)
       .forEach((tiedTeamId) => delete week.scoreTiebreaks[tiedTeamId]);
     week.scoreTiebreaks[teamId] = rank;
@@ -1193,10 +1308,26 @@ function pruneScoreTiebreaks(week) {
   const activeScores = week.scores || {};
   Object.keys(week.scoreTiebreaks).forEach((teamId) => {
     const score = normalizeGolfScore(activeScores[teamId]);
-    if (!score || tiedTeamIdsForScore(week, score).length < 2) {
+    const groupSize = unresolvedTiedTeamIds(week, teamId).length;
+    if (!score || groupSize < 2 || week.scoreTiebreaks[teamId] > groupSize) {
       delete week.scoreTiebreaks[teamId];
     }
   });
+}
+
+function compareLastHoles(week, firstId, secondId) {
+  for (const hole of [18, 17, 16]) {
+    const delta = (week.holeScores?.[firstId]?.[hole] ?? 0)
+      - (week.holeScores?.[secondId]?.[hole] ?? 0);
+    if (delta) return delta;
+  }
+  return 0;
+}
+
+function unresolvedTiedTeamIds(week, teamId) {
+  const score = normalizeGolfScore(week.scores?.[teamId]);
+  if (!score) return [];
+  return tiedTeamIdsForScore(week, score).filter(id => compareLastHoles(week, teamId, id) === 0);
 }
 
 function syncPlacementsFromScores(week) {
@@ -1212,6 +1343,8 @@ function syncPlacementsFromScores(week) {
     .sort((a, b) => {
       const scoreDelta = golfScoreSortValue(week.scores[a.id]) - golfScoreSortValue(week.scores[b.id]);
       if (scoreDelta) return scoreDelta;
+      const holeDelta = compareLastHoles(week, a.id, b.id);
+      if (holeDelta) return holeDelta;
       const tieDelta = (week.scoreTiebreaks?.[a.id] || Number.POSITIVE_INFINITY)
         - (week.scoreTiebreaks?.[b.id] || Number.POSITIVE_INFINITY);
       if (tieDelta) return tieDelta;
@@ -2401,6 +2534,7 @@ els.clearWeekButton.addEventListener("click", () => {
   if (!requireAdmin()) return;
   getWeek().placements = Array(MAX_TEAMS).fill(null);
   getWeek().scores = {};
+  getWeek().holeScores = {};
   getWeek().scoreTiebreaks = {};
   renderPool();
   renderPlacements();

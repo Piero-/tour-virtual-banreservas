@@ -3105,3 +3105,68 @@ body {
   overflow-wrap: anywhere;
 }
 .payment-audit-entry time { color: #b7c5bb; font-size: 12px; }
+.pool-team-row {
+  grid-template-columns: minmax(0, 1fr) 76px;
+  align-items: end;
+}
+.pool-score-stack { display: contents; }
+.pool-team-row > .team-chip { grid-column: 1; grid-row: 1; min-width: 0; overflow-wrap: anywhere; }
+.pool-score-stack > .pool-score-editor { grid-column: 2; grid-row: 1; min-width: 0; }
+.pool-score-stack > .hole-score-summary { grid-column: 1 / -1; grid-row: 2; justify-self: end; }
+.hole-score-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 5px 8px;
+  border: 1px solid #ffffff0d;
+  border-radius: 6px;
+  background: #ffffff08;
+  color: #b7c5bb;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.hole-score-summary span { white-space: nowrap; }
+.hole-score-summary strong { color: #e0e6df; font-weight: 700; }
+.hole-score-modal {
+  box-sizing: border-box;
+  width: min(380px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+  padding: 24px;
+  background: #10231b;
+  color: #f3ebd4;
+  border: 1px solid #344c3f;
+  border-radius: 8px;
+  color-scheme: dark;
+}
+.hole-score-modal::backdrop { background: #0009; }
+.hole-score-modal h2 { font-size: 20px; margin: 0 0 16px; overflow-wrap: anywhere; }
+.hole-score-modal h3 { font-size: 12px; margin: 14px 0 6px; color: #b7c5bb; }
+.hole-score-wheel {
+  box-sizing: border-box;
+  height: 120px;
+  padding-block: 40px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-snap-type: y mandatory;
+  scrollbar-width: none;
+  border-radius: 6px;
+  background: linear-gradient(to bottom, #ffffff03 40px, #ffffff0d 40px, #ffffff0d 80px, #ffffff03 80px);
+}
+.hole-score-wheel::-webkit-scrollbar { display: none; }
+.hole-score-wheel [role="option"] {
+  box-sizing: border-box;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  scroll-snap-align: center;
+  color: #899e90;
+  font-size: 15px;
+  cursor: pointer;
+}
+.hole-score-wheel [aria-selected="true"] { color: #f3ebd4; font-weight: 700; }
+.hole-score-modal .modal-actions { margin-top: 20px; }
+.hole-score-summary:focus-visible, .hole-score-wheel:focus-visible { outline: 2px solid #699c81; outline-offset: 2px; }
