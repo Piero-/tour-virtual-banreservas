@@ -3325,6 +3325,10 @@ div.hole-score-summary { cursor: default; }
 .payment-finance > summary { cursor: pointer; color: #f3ebd4; font-weight: 700; padding: 12px 0; }
 .finance-settings { display: grid; grid-template-columns: repeat(2, minmax(0, 320px)); gap: 20px; margin: 18px 0 24px; }
 .payment-balance-wrap { margin: 0 0 16px; border-block: 1px solid #385246; }
+.concept-grip { display: inline-grid; place-items: center; width: 28px; height: 32px; padding: 0; margin-right: 6px; vertical-align: middle; background: transparent; border: 0; color: #b8c9be; font-size: 20px; cursor: grab; touch-action: none; }
+.concept-grip:focus-visible { outline: 2px solid #e4c580; border-radius: 4px; }
+.payment-balance-table .is-reordering { outline: 2px solid #e4c580; outline-offset: -2px; background: #224c38; }
+.is-reordering .concept-grip { cursor: grabbing; }
 .payment-balance-wrap > summary { padding: 12px 0; cursor: pointer; color: #c9d5cb; font-size: 13px; font-weight: 600; }
 .payment-balance-wrap > summary span { display: inline-block; margin-left: 16px; color: #f3ebd4; font-variant-numeric: tabular-nums; }
 .payment-balance-wrap[open] > summary { border-bottom: 1px solid #385246; }

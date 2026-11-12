@@ -189,7 +189,8 @@ function normalizeFinance(saved = {}) {
     .filter(([week]) => Number.isInteger(Number(week)) && Number(week) >= 1 && Number(week) <= MAX_WEEKS)
     .map(([week, amount]) => [week, moneyCents(amount) / 100]));
   return { weeklyExpense: moneyCents(saved?.weeklyExpense) / 100,
-    expenses: amounts(saved?.expenses), transfers: amounts(saved?.transfers) };
+    expenses: amounts(saved?.expenses), transfers: amounts(saved?.transfers),
+    conceptOrder: Array.isArray(saved?.conceptOrder) ? [...new Set(saved.conceptOrder.filter(value => typeof value === "string"))].slice(0, 30) : [] };
 }
 
 function buildPaymentLedger(category) {
@@ -214,7 +215,7 @@ function buildPaymentLedger(category) {
     const expenseFee = Math.round(expense * 0.002);
     const transferFee = Math.round(transfer * 0.002);
     balance += income - transfer - transferFee;
-    reserve -= expense + expenseFee;
+    reserve -= expense + transferFee;
     receipts += income; totalExpenses += expense; totalTransfers += transfer; totalFees += transferFee;
     return { week: number, income, pool, plannedTransfer, expense, transfer, expenseFee, transferFee, balance, reserve, transferPaid };
   });
@@ -571,6 +572,7 @@ function isUserActivelyEditing() {
   return ["INPUT", "SELECT", "TEXTAREA"].includes(activeElement.tagName)
     || activeElement.isContentEditable
     || selectedTeamId !== null
+    || Boolean(document.querySelector(".is-reordering"))
     || !els.finalFeeModal.hidden
     || Boolean(document.querySelector(".hole-score-modal[open]"));
 }
@@ -1734,7 +1736,6 @@ function renderFinance() {
   const balanceTotal = document.querySelector("#paymentBalanceTotal");
   if (balanceTotal) balanceTotal.textContent = money(ledger.balance);
   const weeklyReceived = ledger.rows.reduce((sum, item) => sum + item.income, 0);
-  const expenseFees = ledger.rows.reduce((sum, item) => sum + item.expenseFee, 0);
   const metrics = [
     ["Inscripciones recibidas", ledger.inscription, `${ledger.count} pagos × DOP 15,000`],
     ["Reserva recibida para gastos", ledger.reserveReceived, `${ledger.count} pagos × DOP 3,000; incluida en la cuenta`],
@@ -1742,15 +1743,18 @@ function renderFinance() {
     ["Aporte recibido a la final", ledger.donation, "Donaciones recibidas"],
     ["Total recibido", ledger.receipts, "Inscripciones + reserva + pagos semanales + aporte", "subtotal"],
     ["Transferencias realizadas", -ledger.totalTransfers, "Pool distribuido + gastos del tour"],
-    ["Comisiones de salida · 0.2%", -ledger.totalFees, "Calculadas sobre el monto completo de cada transferencia"],
+    ["Comisiones de salida · 0.2%", -ledger.totalFees, "Sobre cada transferencia completa; se cubren con la reserva para gastos"],
     ["Saldo esperado en cuenta", ledger.balance, "Total recibido − transferencias − comisiones", "balance"],
     ["Gastos del tour pagados", ledger.totalExpenses, "Ya incluidos en las transferencias; no se restan otra vez"],
-    ["Comisión correspondiente a gastos", expenseFees, "Ya incluida en las comisiones de salida"],
-    ["Reserva restante para gastos", ledger.reserve, "Reserva recibida − gastos pagados − su comisión", "subtotal"],
+    ["Reserva restante para gastos", ledger.reserve, "Reserva recibida − gastos pagados − todas las comisiones", "subtotal"],
     ["Aporte de inscripciones a la final", moneyCents(ledger.count * 10000), "DOP 10,000 por inscripción; incluido en lo recibido"],
+    ["Pagos a Hoyo 20", moneyCents(ledger.count * 5000), `${ledger.count} inscripciones × DOP 5,000; monto destinado, no salida confirmada`],
   ];
+  const order = state.finance.conceptOrder;
+  metrics.sort((a, b) => (order.includes(a[0]) ? order.indexOf(a[0]) : order.length) - (order.includes(b[0]) ? order.indexOf(b[0]) : order.length));
   summary.innerHTML = `<caption>Balance actual de la cuenta</caption><thead><tr><th scope="col">Concepto</th><th scope="col">Monto DOP</th><th scope="col">Detalle</th></tr></thead><tbody>`
-    + metrics.map(([label, amount, detail, style = ""]) => `<tr class="balance-${style}"><th scope="row">${label}</th><td class="balance-amount ${amount < 0 ? "balance-outgoing" : ""}">${money(amount)}</td><td class="balance-detail">${detail}</td></tr>`).join("") + "</tbody>";
+    + metrics.map(([label, amount, detail, style = ""]) => `<tr class="balance-${style}" data-concept="${escapeHtml(label)}"><th scope="row"><button type="button" class="concept-grip" title="Arrastrar para ordenar; flechas arriba y abajo" aria-label="Reordenar ${escapeHtml(label)}">⠿</button>${label}</th><td class="balance-amount ${amount < 0 ? "balance-outgoing" : ""}">${money(amount)}</td><td class="balance-detail">${detail}</td></tr>`).join("") + "</tbody>";
+  setupConceptReorder(summary);
   const row = (label, cells, className = "") => `<tr class="${className}"><th scope="row">${label}</th>${cells.map(cell => `<td>${cell}</td>`).join("")}</tr>`;
   const amounts = key => ledger.rows.map(item => money(item[key]));
   table.innerHTML = `<caption>Movimientos semanales · saldo calculado con todas las inscripciones y aportes recibidos a la fecha</caption><thead><tr><th>Movimiento</th>${ledger.rows.map(item => `<th>${weekDisplayName(item.week)}</th>`).join("")}</tr></thead><tbody>`
@@ -1760,8 +1764,50 @@ function renderFinance() {
     + row("Transferencia realizada · pool + gasto", ledger.rows.map(item => `<label class="finance-paid"><input type="checkbox" data-finance-transfer="${item.week}" ${item.transferPaid ? "checked" : ""} aria-label="Transferencia realizada ${weekDisplayName(item.week)}" /><span>${money(item.transferPaid ? item.transfer : item.plannedTransfer)}</span></label>`))
     + row("Comisión de transferencias · 0.2%", amounts("transferFee"))
     + row("Saldo esperado en cuenta", ledger.rows.map(item => `<strong class="${item.balance < 0 ? "finance-negative" : ""}">${money(item.balance)}</strong>`), "finance-total")
-    + row("Reserva de gastos restante (incluye su comisión)", ledger.rows.map(item => `<span class="${item.reserve < 0 ? "finance-negative" : ""}">${money(item.reserve)}</span>`))
+    + row("Reserva restante (menos todas las comisiones)", ledger.rows.map(item => `<span class="${item.reserve < 0 ? "finance-negative" : ""}">${money(item.reserve)}</span>`))
     + "</tbody>";
+}
+
+function setupConceptReorder(table) {
+  const body = table.tBodies[0];
+  const persist = () => {
+    state.finance.conceptOrder = [...body.rows].map(row => row.dataset.concept);
+    saveState(true);
+  };
+  body.querySelectorAll(".concept-grip").forEach(handle => {
+    const row = handle.closest("tr");
+    let pointer = null;
+    handle.addEventListener("pointerdown", event => {
+      if (!requireAdmin() || !event.isPrimary || event.button !== 0) return;
+      pointer = event.pointerId;
+      handle.setPointerCapture(pointer);
+      row.classList.add("is-reordering");
+      event.preventDefault();
+    });
+    handle.addEventListener("pointermove", event => {
+      if (pointer !== event.pointerId) return;
+      const target = document.elementFromPoint(event.clientX, event.clientY)?.closest("tr[data-concept]");
+      if (!target || target === row || target.parentElement !== body) return;
+      const rect = target.getBoundingClientRect();
+      body.insertBefore(row, event.clientY > rect.top + rect.height / 2 ? target.nextSibling : target);
+    });
+    handle.addEventListener("pointerup", event => {
+      if (pointer !== event.pointerId) return;
+      pointer = null;
+      row.classList.remove("is-reordering");
+      if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+      persist();
+    });
+    handle.addEventListener("pointercancel", () => { pointer = null; renderFinance(); });
+    handle.addEventListener("keydown", event => {
+      if (!["ArrowUp", "ArrowDown"].includes(event.key) || !requireAdmin()) return;
+      event.preventDefault();
+      if (event.key === "ArrowUp" && row.previousElementSibling) body.insertBefore(row, row.previousElementSibling);
+      if (event.key === "ArrowDown" && row.nextElementSibling) body.insertBefore(row.nextElementSibling, row);
+      handle.focus();
+      persist();
+    });
+  });
 }
 
 document.querySelector("#weeklyExpenseInput")?.addEventListener("change", event => {

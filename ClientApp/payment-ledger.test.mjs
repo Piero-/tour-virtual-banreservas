@@ -15,6 +15,11 @@ function category() {
     weeks: [{ paidTeamIds: ['a'] }, { paidTeamIds: [] }],
     finance: { weeklyExpense: 1000, expenses: {}, transfers: {} } };
 }
+test('Concept order survives normalization and removes duplicates', () => {
+  const saved = { conceptOrder: ['Pagos a Hoyo 20', 'Total recibido', 'Total recibido', null] };
+  const result = context.normalizeFinance(JSON.parse(JSON.stringify(saved)));
+  assert.equal(result.conceptOrder.join('|'), 'Pagos a Hoyo 20|Total recibido');
+});
 test('Reserve stays in cash without double counting; planned expenses are not paid', () => {
   const ledger = context.buildPaymentLedger(category());
   assert.equal(ledger.balance, 2400000);
@@ -29,7 +34,7 @@ test('Combined transfer subtracts expense once and charges 0.2 percent once', ()
   state.finance.transfers[1] = 7000;
   const ledger = context.buildPaymentLedger(state);
   assert.equal(ledger.balance, 1698600);
-  assert.equal(ledger.reserve, 199800);
+  assert.equal(ledger.reserve, 198600);
   assert.equal(ledger.totalFees, 1400);
   state.finance.weeklyExpense = 6000;
   assert.equal(context.buildPaymentLedger(state).balance, ledger.balance);
