@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import Roulette from "./Roulette";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 const API_STATE_URL = `${API_BASE_URL}/api/state`;
@@ -6,6 +7,7 @@ const API_PRESENCE_URL = `${API_BASE_URL}/api/presence`;
 const API_AUTH_URL = `${API_BASE_URL}/api/auth/login`;
 
 export default function App() {
+  const roulettePage = /\/ruleta\/?$/.test(location.pathname);
   const [ready, setReady] = useState(false);
   const booted = useRef(false);
 
@@ -54,7 +56,7 @@ export default function App() {
       const { downloadSeasonPdf } = await import("./season-pdf");
       return downloadSeasonPdf(archive);
     };
-    script.src = "/legacy-app.js?v=20260928-named-users";
+    script.src = "/legacy-app.js?v=20261111-roulette";
     script.async = false;
     document.body.appendChild(script);
   }, [ready]);
@@ -81,7 +83,7 @@ export default function App() {
 
   return (
     <>
-      <main className="app-shell">
+      <main className="app-shell" hidden={roulettePage}>
         <header className="topbar">
           <div className="brand-lockup">
             <div className="brand-mark">
@@ -110,15 +112,11 @@ export default function App() {
             </label>
             <label className="field compact admin-only">
               <span>Equipos</span>
-              <input id="teamCountInput" type="number" min="3" max="12" defaultValue="12" />
+              <input id="teamCountInput" type="number" min="3" max="20" defaultValue="12" />
             </label>
             <label className="field compact admin-only">
               <span>Semanas</span>
               <input id="weekLimitInput" type="number" min="1" max="11" defaultValue="11" />
-            </label>
-            <label className="field bonus-field admin-only">
-              <span>Donación final DOP</span>
-              <input id="finalDonationInput" type="number" min="0" step="1000" defaultValue="0" />
             </label>
             <details className="action-menu admin-only" hidden>
               <summary className="button menu-trigger">Datos</summary>
@@ -218,13 +216,24 @@ export default function App() {
             <div>
               <p className="eyebrow">Pagos</p>
               <h2>Pagos por equipo</h2>
-              <p id="paymentSummary" className="prize-subtitle"></p>
             </div>
             <button id="showWeeksButton" className="button secondary admin-only" type="button">Mostrar semanas</button>
           </div>
+          <details className="payment-balance-wrap">
+            <summary>Balance de la cuenta <span id="paymentBalanceTotal"></span></summary>
+            <table id="paymentSummary" className="payment-balance-table" aria-live="polite"></table>
+          </details>
           <div className="table-scroll payment-scroll">
             <table id="paymentTable" className="payment-table"></table>
           </div>
+          <details className="payment-finance" id="paymentFinance">
+            <summary>Movimientos y balance</summary>
+            <div className="finance-settings">
+              <label className="field"><span>Gasto semanal previsto · DOP</span><input id="weeklyExpenseInput" type="number" min="0" step="0.01" defaultValue="0" /></label>
+              <label className="field"><span>Aporte recibido a la final · DOP</span><input id="finalDonationInput" type="number" min="0" step="0.01" defaultValue="0" /></label>
+            </div>
+            <div className="table-scroll payment-scroll"><table id="financeTable" className="finance-table"></table></div>
+          </details>
           <details id="paymentAudit" className="payment-audit">
             <summary>Auditoría de pagos</summary>
             <div id="paymentAuditEntries" aria-live="polite"></div>
@@ -263,7 +272,9 @@ export default function App() {
           </div>
           <div id="seasonArchiveList"></div>
         </section>
+        <footer className="roulette-launch admin-only"><button id="openRouletteButton" className="button secondary" type="button">Ruleta de equipos</button></footer>
       </main>
+      {roulettePage && <Roulette />}
 
       <div id="finalFeeModal" className="modal-backdrop" hidden>
         <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="finalFeeTitle">

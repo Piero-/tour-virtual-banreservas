@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
@@ -162,6 +163,56 @@ app.MapPut("/api/state", async (JsonElement payload, AppDbContext db, HttpContex
     }
 
     await db.SaveChangesAsync();
+    return Results.NoContent();
+});
+
+app.MapPost("/api/season-registration", async (JsonElement payload, HttpContext context, AppDbContext db) =>
+{
+    var user = await UserAuth.Current(context, db);
+    if (user is null) return Results.Unauthorized();
+    var request = JsonNode.Parse(payload.GetRawText()) as JsonObject;
+    if (request?["category"] is not JsonValue categoryValue || !categoryValue.TryGetValue<string>(out var category)
+        || (category != "A" && category != "C")
+        || request["registrationId"] is not JsonValue idValue || !idValue.TryGetValue<string>(out var id) || !Guid.TryParse(id, out _)
+        || request["expectedState"] is not JsonValue expectedValue || !expectedValue.TryGetValue<string>(out var expected)
+        || request["nextCategory"] is not JsonObject next
+        || next["teamCount"] is not JsonValue countValue || !countValue.TryGetValue<int>(out var count) || count < 3 || count > 20
+        || next["teams"] is not JsonArray teams || teams.Count < count)
+        return Results.BadRequest(new { error = "Registro incompleto." });
+    var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    foreach (var team in teams.Take(count))
+    {
+        if (team?["name"] is not JsonValue nameValue || !nameValue.TryGetValue<string>(out var name) || string.IsNullOrWhiteSpace(name)
+            || team["members"] is not JsonObject members) return Results.BadRequest();
+        foreach (var tier in new[] { "A", "B", "C" })
+            if (members[tier] is not JsonValue memberValue || !memberValue.TryGetValue<string>(out var member)
+                || string.IsNullOrWhiteSpace(member) || !names.Add(member.Trim())) return Results.BadRequest();
+    }
+    await using var transaction = await db.Database.BeginTransactionAsync();
+    var record = await db.AppStates.AsNoTracking().FirstOrDefaultAsync(row => row.Key == "default");
+    if (record is null) return Results.Conflict();
+    var current = JsonNode.Parse(record.Json)!.AsObject();
+    if (current["categories"]?[category]?["registrationId"]?.GetValue<string>() == id)
+        return Results.NoContent();
+    if (record.Json != expected) return Results.Conflict();
+    next["registrationId"] = id;
+    current["categories"]![category] = next.DeepClone();
+    if (request["archive"] is JsonObject archive)
+    {
+        archive["categoryId"] = category;
+        archive["snapshot"] = JsonNode.Parse(record.Json)!["categories"]![category]!.DeepClone();
+        if (current["archives"] is not JsonArray) current["archives"] = new JsonArray();
+        current["archives"]!.AsArray().Add(archive.DeepClone());
+    }
+    var json = current.ToJsonString();
+    var updatedAt = DateTimeOffset.UtcNow;
+    // Compare-and-swap protects the archive and registration against concurrent saves.
+    var changed = await db.AppStates.Where(row => row.Id == record.Id && row.Json == expected)
+        .ExecuteUpdateAsync(update => update.SetProperty(row => row.Json, json).SetProperty(row => row.UpdatedAt, updatedAt));
+    if (changed != 1) return Results.Conflict();
+    PaymentAudit.Record(db, record.Json, json, user.Username);
+    await db.SaveChangesAsync();
+    await transaction.CommitAsync();
     return Results.NoContent();
 });
 

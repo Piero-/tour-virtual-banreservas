@@ -5,6 +5,13 @@ import vm from "node:vm";
 import { createSeasonPdf } from "./src/season-pdf.js";
 
 const source = readFileSync(new URL("../app.js", import.meta.url), "utf8");
+test("All twenty places have finite points, including the extended scoring scale", () => {
+  const context = vm.createContext({});
+  vm.runInContext(source.split("\n")[0] + ";globalThis.points = POINTS_BY_PLACE;", context);
+  assert.equal(context.points.length, 20);
+  assert.equal(context.points.slice(12).join(","), "20,10,0,0,0,0,0,0");
+  assert.ok(context.points.every(Number.isFinite));
+});
 test("Last three holes survive JSON storage and invalid scores default to par", () => {
   const context = vm.createContext({ defaultTeams: [{ id: "team-1" }, { id: "team-2" }] });
   vm.runInContext(functionSource("normalizeHoleScores"), context);
@@ -71,6 +78,7 @@ function setup(ok = true) {
     API_STATE_URL: "/api/state", adminToken: "test", fetch: async () => ({ ok }),
     els: { reportExport: { hidden: false } }, render() {}, showToast() {},
   });
+  vm.runInContext(functionSource("buildSeasonArchive"), context);
   vm.runInContext(functionSource("archiveCurrentSeason"), context);
   return context;
 }
@@ -101,6 +109,18 @@ test("Cancel does not archive", async () => {
   context.confirm = () => false;
   await context.archiveCurrentSeason();
   assert.equal(context.appState.archives.length, 0);
+});
+
+test("Roulette skips an already archived empty season but preserves new activity", () => {
+  const context = setup();
+  vm.runInContext(functionSource("seasonAlreadyArchived"), context);
+  const empty = { teams: [{ id: "team-1", name: "Ana" }], inscriptionPaidTeamIds: [], weeks: [{ paidTeamIds: [], placements: [], scores: {} }] };
+  const archives = [{ categoryId: "A", snapshot: structuredClone(empty) }];
+  assert.equal(context.seasonAlreadyArchived(empty, archives, "A"), true);
+  assert.equal(context.seasonAlreadyArchived(empty, archives, "C"), false);
+  assert.equal(context.seasonAlreadyArchived({ ...empty, finalDonation: 1000 }, archives, "A"), false);
+  empty.weeks[0].scores["team-1"] = "-8";
+  assert.equal(context.seasonAlreadyArchived(empty, archives, "A"), false);
 });
 
 test("Archived seasons survive state normalization", () => {

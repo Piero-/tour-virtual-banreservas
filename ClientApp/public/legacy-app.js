@@ -1,6 +1,7 @@
-const POINTS_BY_PLACE = [500, 375, 265, 200, 150, 125, 100, 80, 65, 50, 40, 30];
+const POINTS_BY_PLACE = [500, 375, 265, 200, 150, 125, 100, 80, 65, 50, 40, 30, 20, 10, 0, 0, 0, 0, 0, 0];
+const IS_ROULETTE_PAGE = /\/ruleta\/?$/.test(window.location.pathname);
 const MIN_TEAMS = 3;
-const MAX_TEAMS = 12;
+const MAX_TEAMS = 20;
 const MAX_WEEKS = 11;
 const INSCRIPTION_FEE_DOP = 18000;
 const INSCRIPTION_FINAL_POOL_DOP = 10000;
@@ -103,12 +104,14 @@ const els = {
 function createCategoryState(overrides = {}) {
   return {
     activeWeek: 1,
-    teamCount: MAX_TEAMS,
+    registrationId: "",
+    teamCount: 12,
     weekLimit: MAX_WEEKS,
     startDate: "",
     lastAutoWeek: null,
     paymentDefaultsVersion: PAYMENT_DEFAULTS_VERSION,
     finalDonation: 0,
+    finance: { weeklyExpense: 0, expenses: {}, transfers: {} },
     finalWeekFee: DEFAULT_FINAL_WEEK_FEE_DOP,
     hiddenWeeks: [],
     inscriptionPaidTeamIds: [],
@@ -153,13 +156,15 @@ function normalizeCategoryState(saved = {}) {
   }));
 
   return createCategoryState({
+    registrationId: String(saved.registrationId || ""),
     activeWeek: clamp(Number(saved.activeWeek) || 1, 1, MAX_WEEKS),
-    teamCount: clamp(Number(saved.teamCount) || MAX_TEAMS, MIN_TEAMS, MAX_TEAMS),
+    teamCount: clamp(Number(saved.teamCount) || 12, MIN_TEAMS, MAX_TEAMS),
     weekLimit: clamp(Number(saved.weekLimit) || MAX_WEEKS, 1, MAX_WEEKS),
     startDate: normalizeDateInput(saved.startDate),
     lastAutoWeek: normalizeAutoWeek(saved.lastAutoWeek),
     paymentDefaultsVersion: PAYMENT_DEFAULTS_VERSION,
     finalDonation: Math.max(0, Number(saved.finalDonation) || 0),
+    finance: normalizeFinance(saved.finance),
     finalWeekFee: Math.max(0, Number(saved.finalWeekFee) || DEFAULT_FINAL_WEEK_FEE_DOP),
     hiddenWeeks: normalizeHiddenWeeks(saved.hiddenWeeks),
     inscriptionPaidTeamIds: shouldPreservePayments ? normalizePaidTeamIds(saved.inscriptionPaidTeamIds) : [],
@@ -172,6 +177,48 @@ function normalizePaidTeamIds(savedIds) {
   if (!Array.isArray(savedIds)) return defaultTeams.map((team) => team.id);
   const validIds = new Set(defaultTeams.map((team) => team.id));
   return savedIds.filter((teamId) => validIds.has(teamId));
+}
+
+function moneyCents(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.round(Math.max(0, Math.min(number, 1000000000)) * 100) : 0;
+}
+
+function normalizeFinance(saved = {}) {
+  const amounts = values => Object.fromEntries(Object.entries(values || {})
+    .filter(([week]) => Number.isInteger(Number(week)) && Number(week) >= 1 && Number(week) <= MAX_WEEKS)
+    .map(([week, amount]) => [week, moneyCents(amount) / 100]));
+  return { weeklyExpense: moneyCents(saved?.weeklyExpense) / 100,
+    expenses: amounts(saved?.expenses), transfers: amounts(saved?.transfers) };
+}
+
+function buildPaymentLedger(category) {
+  const finance = normalizeFinance(category.finance);
+  const activeIds = new Set(category.teams.slice(0, category.teamCount).map(team => team.id));
+  const countPaid = ids => new Set((ids || []).filter(id => activeIds.has(id))).size;
+  const count = countPaid(category.inscriptionPaidTeamIds);
+  const inscription = moneyCents(count * 15000);
+  const reserveReceived = moneyCents(count * 3000);
+  const donation = moneyCents(category.finalDonation);
+  let balance = inscription + reserveReceived + donation;
+  let reserve = reserveReceived;
+  let receipts = balance, totalExpenses = 0, totalTransfers = 0, totalFees = 0;
+  const rows = category.weeks.slice(0, category.weekLimit).map((week, index) => {
+    const number = index + 1;
+    const income = moneyCents(countPaid(week.paidTeamIds) * (number === category.weekLimit ? category.finalWeekFee : REGULAR_WEEK_FEE_DOP));
+    const transferPaid = Object.hasOwn(finance.transfers, number);
+    const expense = transferPaid ? moneyCents(finance.expenses[number]) : 0;
+    const pool = income + (number === category.weekLimit ? moneyCents(count * 10000) + donation : 0);
+    const plannedTransfer = pool + moneyCents(finance.weeklyExpense);
+    const transfer = moneyCents(finance.transfers[number]);
+    const expenseFee = Math.round(expense * 0.002);
+    const transferFee = Math.round(transfer * 0.002);
+    balance += income - transfer - transferFee;
+    reserve -= expense + expenseFee;
+    receipts += income; totalExpenses += expense; totalTransfers += transfer; totalFees += transferFee;
+    return { week: number, income, pool, plannedTransfer, expense, transfer, expenseFee, transferFee, balance, reserve, transferPaid };
+  });
+  return { count, inscription, reserveReceived, donation, receipts, totalExpenses, totalTransfers, totalFees, balance, reserve, rows };
 }
 
 function normalizeHiddenWeeks(savedWeeks) {
@@ -278,7 +325,7 @@ function normalizeAppStatePayload(saved) {
 }
 
 function categoryFromPath(pathname = window.location.pathname) {
-  const normalizedPath = String(pathname || "").replace(/\/+$/, "") || "/";
+  const normalizedPath = String(pathname || "").replace(/\/ruleta\/?$/, "").replace(/\/+$/, "") || "/";
   if (normalizedPath === CATEGORY_ROUTES.A) return "A";
   if (normalizedPath === CATEGORY_ROUTES.C) return "C";
   return null;
@@ -300,6 +347,7 @@ function syncCategoryRoute(category, { replace = false } = {}) {
 }
 
 function saveState(immediate = false) {
+  if (IS_ROULETTE_PAGE) return;
   state.activeWeek = activeWeek;
   appState.categories[appState.activeCategory] = state;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
@@ -474,6 +522,7 @@ function logoutAdmin() {
 }
 
 async function pollForRemoteUpdates() {
+  if (IS_ROULETTE_PAGE) return;
   if (isArchivingSeason) return;
   if (!window.fetch || !API_STATE_URL || isApplyingRemoteState) return;
   if (apiSaveTimer || Date.now() - lastLocalSaveAt < LOCAL_SAVE_GRACE_MS) return;
@@ -652,7 +701,7 @@ function weekDisplayName(week) {
 function teamScoreForWeek(teamId, week) {
   const placeIndex = week.placements.indexOf(teamId);
   if (placeIndex === -1 || placeIndex >= state.teamCount) return 0;
-  return POINTS_BY_PLACE[placeIndex] * (isDoublePointsWeek(week) ? 2 : 1);
+  return (POINTS_BY_PLACE[placeIndex] ?? 0) * (isDoublePointsWeek(week) ? 2 : 1);
 }
 
 function teamGolfScoreForWeek(teamId, week) {
@@ -826,23 +875,7 @@ async function archiveCurrentSeason() {
   isArchivingSeason = true;
   window.clearTimeout(apiSaveTimer);
   apiSaveTimer = null;
-  const archive = {
-    id: crypto.randomUUID(), name: name.slice(0, 100), archivedAt: new Date().toISOString(),
-    category: categoryLabel(), categoryId: appState.activeCategory, snapshot: structuredClone(state),
-    inscriptionFee: INSCRIPTION_FEE_DOP, inscriptionFinalPool: INSCRIPTION_FINAL_POOL_DOP,
-    regularFee: REGULAR_WEEK_FEE_DOP,
-    weeks: state.weeks.slice(0, state.weekLimit).map((week) => ({ name: weekDisplayName(week), pool: prizePool(week), doublePoints: isDoublePointsWeek(week) })),
-    results: getActiveTeams().map((team) => ({
-      id: team.id, name: team.name, members: normalizeTeamMembers(team.members),
-      inscriptionPaid: state.inscriptionPaidTeamIds.includes(team.id),
-      points: teamTotal(team.id), money: teamMoneyTotal(team.id),
-      weeks: state.weeks.slice(0, state.weekLimit).map((week) => ({
-        points: teamScoreForWeek(team.id, week), score: teamGolfScoreForWeek(team.id, week),
-        place: teamPlaceForWeek(team.id, week) === null ? null : teamPlaceForWeek(team.id, week) + 1,
-        money: teamMoneyForWeek(team.id, week), paid: week.paidTeamIds.includes(team.id),
-      })),
-    })).sort((a, b) => b.points - a.points || a.name.localeCompare(b.name)),
-  };
+  const archive = buildSeasonArchive(name);
   const next = structuredClone(appState);
   next.archives.push(archive);
   next.categories[appState.activeCategory] = createCategoryState({
@@ -866,6 +899,72 @@ async function archiveCurrentSeason() {
     showToast("No se pudo archivar. Tu temporada actual sigue intacta.", "error");
   } finally { button.disabled = false; isArchivingSeason = false; }
 }
+
+function buildSeasonArchive(name) {
+  return {
+    id: crypto.randomUUID(), name: name.slice(0, 100), archivedAt: new Date().toISOString(),
+    category: categoryLabel(), categoryId: appState.activeCategory, snapshot: structuredClone(state),
+    inscriptionFee: INSCRIPTION_FEE_DOP, inscriptionFinalPool: INSCRIPTION_FINAL_POOL_DOP,
+    regularFee: REGULAR_WEEK_FEE_DOP,
+    weeks: state.weeks.slice(0, state.weekLimit).map((week) => ({ name: weekDisplayName(week), pool: prizePool(week), doublePoints: isDoublePointsWeek(week) })),
+    results: getActiveTeams().map((team) => ({
+      id: team.id, name: team.name, members: normalizeTeamMembers(team.members),
+      inscriptionPaid: state.inscriptionPaidTeamIds.includes(team.id),
+      points: teamTotal(team.id), money: teamMoneyTotal(team.id),
+      weeks: state.weeks.slice(0, state.weekLimit).map((week) => ({
+        points: teamScoreForWeek(team.id, week), score: teamGolfScoreForWeek(team.id, week),
+        place: teamPlaceForWeek(team.id, week) === null ? null : teamPlaceForWeek(team.id, week) + 1,
+        money: teamMoneyForWeek(team.id, week), paid: week.paidTeamIds.includes(team.id),
+      })),
+    })).sort((a, b) => b.points - a.points || a.name.localeCompare(b.name)),
+  };
+}
+
+function seasonAlreadyArchived(category, archives, categoryId) {
+  const latest = [...archives].reverse().find(item => (item.categoryId || "A") === categoryId);
+  if (!latest?.snapshot) return false;
+  const hasActivity = Boolean(category.finalDonation || category.startDate)
+    || Object.values(category.finance?.expenses || {}).some(Boolean)
+    || Object.values(category.finance?.transfers || {}).some(Boolean)
+    || category.inscriptionPaidTeamIds.length > 0 || category.weeks.some(week =>
+    week.paidTeamIds.length || week.placements.some(Boolean) || Object.keys(week.scores || {}).length || Object.keys(week.holeScores || {}).length);
+  return !hasActivity && JSON.stringify(category.teams) === JSON.stringify(latest.snapshot.teams);
+}
+
+window.completeRoulette = async ({ id, teams }) => {
+  if (!adminToken || !IS_ROULETTE_PAGE) throw new Error("Inicia sesión como administrador.");
+  if (teams.length < MIN_TEAMS || teams.length > MAX_TEAMS) throw new Error("La cantidad de equipos no es válida.");
+  const response = await fetch(API_STATE_URL, { cache: "no-store" });
+  if (!response.ok) throw new Error("No se pudo consultar el tour actual. No se ha cambiado nada.");
+  const raw = await response.text();
+  const latest = JSON.parse(raw);
+  if (!latest) throw new Error("Abre el tour y guarda sus datos antes de registrar la nueva temporada.");
+  const category = appState.activeCategory;
+  Object.assign(appState, normalizeAppStatePayload(latest));
+  appState.activeCategory = category;
+  state = appState.categories[category];
+  const nextCategory = createCategoryState({
+    registrationId: id, teamCount: teams.length,
+    teams: defaultTeams.map((team, index) => teams[index] || structuredClone(team)),
+    weekLimit: state.weekLimit, finalWeekFee: state.finalWeekFee,
+  });
+  const archive = seasonAlreadyArchived(state, appState.archives, category) ? null
+    : buildSeasonArchive(`Temporada ${appState.archives.length + 1} · ${new Date().toLocaleDateString("es-DO")}`);
+  const saved = await fetch(API_STATE_URL.replace(/\/state$/, "/season-registration"), {
+    method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${adminToken}` },
+    body: JSON.stringify({ category, registrationId: id, expectedState: raw, nextCategory, archive }),
+  });
+  if (saved.status === 409) throw new Error("El tour cambió mientras se registraba. Revisa los datos y confirma otra vez.");
+  if (saved.status === 401) throw new Error("Tu sesión terminó. Inicia sesión de nuevo; el sorteo sigue guardado.");
+  if (!saved.ok) throw new Error("No se pudo registrar. El tour actual no se ha reemplazado.");
+};
+document.querySelector("#openRouletteButton")?.addEventListener("click", async () => {
+  if (!requireAdmin()) return;
+  saveState(true);
+  await apiSaveChain;
+  window.location.assign(`${CATEGORY_ROUTES[appState.activeCategory]}/ruleta`);
+});
+window.dispatchEvent(new Event("roulette-ready"));
 
 document.querySelector("#archiveSeasonButton")?.addEventListener("click", archiveCurrentSeason);
 
@@ -1016,7 +1115,7 @@ function renderPlacements() {
   els.weekAssignedCount.textContent = `${assignedCount} / ${state.teamCount}`;
   els.placementGrid.innerHTML = "";
 
-  POINTS_BY_PLACE.slice(0, state.teamCount).forEach((points, placeIndex) => {
+  Array.from({ length: state.teamCount }, (_, index) => POINTS_BY_PLACE[index]).forEach((points, placeIndex) => {
     const card = document.createElement("article");
     const medalTone = MEDAL_TONES[placeIndex];
     card.className = `place-card drop-zone ${medalTone ? `podium-card medal-${medalTone}` : ""}`;
@@ -1025,7 +1124,7 @@ function renderPlacements() {
     card.innerHTML = `
       <div class="place-rank">
         <strong>${placeLabel(placeIndex + 1)}</strong>
-        <span>${points * (isDoublePointsWeek(week) ? 2 : 1)} pts${prizeText}</span>
+        <span>${points === undefined ? "Puntos por definir" : `${points * (isDoublePointsWeek(week) ? 2 : 1)} pts`}${prizeText}</span>
       </div>
       <div class="place-drop"></div>
     `;
@@ -1059,7 +1158,10 @@ function createScoreControl(week, teamId) {
     const badge = document.createElement("div");
     badge.className = `score-badge ${score ? "" : "is-empty"}`;
     badge.textContent = score || "TBD";
-    return badge;
+    const stack = document.createElement("div");
+    stack.className = "score-control-stack";
+    stack.append(badge, createHoleScoreControl(week, teamId));
+    return stack;
   }
 
   const stack = document.createElement("div");
@@ -1096,31 +1198,17 @@ function createScoreControl(week, teamId) {
 }
 
 function createPoolScoreControl(week, teamId) {
-  const label = document.createElement("label");
-  label.className = "pool-score-editor";
-  label.innerHTML = "<span>Score</span>";
-
-  const input = document.createElement("input");
-  input.type = "text";
-  input.inputMode = "text";
-  input.maxLength = 3;
-  input.placeholder = "-8";
-  input.value = normalizeGolfScore(week.scores?.[teamId]);
-  input.setAttribute("aria-label", `Score rápido de ${getTeam(teamId)?.name || "equipo"}`);
-  input.addEventListener("click", (event) => event.stopPropagation());
-  input.addEventListener("input", () => {
-    input.value = input.value.toUpperCase().replace(/[^0-9+\-E]/g, "").slice(0, 3);
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "pool-score-add";
+  button.textContent = "+";
+  button.title = `Editar score y hoyos de ${getTeam(teamId)?.name || "equipo"}`;
+  button.setAttribute("aria-label", button.title);
+  button.addEventListener("click", event => {
+    event.stopPropagation();
+    if (requireAdmin()) openHoleScores(week, teamId, button);
   });
-  input.addEventListener("change", () => updateTeamGolfScore(week, teamId, input.value));
-  input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") input.blur();
-  });
-
-  label.append(input);
-  const stack = document.createElement("div");
-  stack.className = "pool-score-stack";
-  stack.append(label, createHoleScoreControl(week, teamId));
-  return stack;
+  return button;
 }
 
 const HOLE_OPTIONS = [
@@ -1130,8 +1218,9 @@ const HOLE_OPTIONS = [
 ];
 
 function createHoleScoreControl(week, teamId) {
-  const button = document.createElement("button");
-  button.type = "button";
+  const editable = isAdminMode();
+  const button = document.createElement(editable ? "button" : "div");
+  if (editable) button.type = "button";
   button.className = "hole-score-summary";
   button.setAttribute("aria-label", `Últimos tres hoyos de ${getTeam(teamId)?.name || "equipo"}`);
   for (const hole of [18, 17, 16]) {
@@ -1143,7 +1232,7 @@ function createHoleScoreControl(week, teamId) {
     item.append(score);
     button.append(item);
   }
-  button.addEventListener("click", event => {
+  if (editable) button.addEventListener("click", event => {
     event.stopPropagation();
     if (requireAdmin()) openHoleScores(week, teamId, button);
   });
@@ -1158,6 +1247,83 @@ function openHoleScores(week, teamId, trigger) {
   title.id = "holeScoreTitle";
   title.textContent = getTeam(teamId)?.name || "Equipo";
   modal.append(title);
+  const scoreLabel = document.createElement("div");
+  scoreLabel.className = "modal-team-score";
+  scoreLabel.textContent = "Score general";
+  const scoreValues = Array.from({ length: 199 }, (_, index) => {
+    const value = index - 99;
+    return value === 0 ? "E" : value > 0 ? `+${value}` : String(value);
+  });
+  scoreValues.splice(99, 0, "");
+  const scoreCarousel = document.createElement("div");
+  scoreCarousel.className = "score-carousel";
+  scoreCarousel.tabIndex = 0;
+  scoreCarousel.setAttribute("role", "listbox");
+  scoreCarousel.setAttribute("aria-label", "Score general");
+  let scoreDrag = null;
+  let suppressScoreClick = false;
+  const settleScoreDrag = event => {
+    if (!scoreDrag || scoreDrag.id !== event.pointerId) return;
+    const moved = scoreDrag.moved;
+    scoreDrag = null;
+    scoreCarousel.classList.remove("is-dragging");
+    if (scoreCarousel.hasPointerCapture(event.pointerId)) scoreCarousel.releasePointerCapture(event.pointerId);
+    if (moved) {
+      suppressScoreClick = true;
+      scoreCarousel.scrollTo({ left: Math.round(scoreCarousel.scrollLeft / 64) * 64, behavior: "smooth" });
+    }
+  };
+  scoreCarousel.addEventListener("pointerdown", event => {
+    if (!event.isPrimary || (event.pointerType === "mouse" && event.button !== 0)) return;
+    suppressScoreClick = false;
+    scoreDrag = { id: event.pointerId, x: event.clientX, left: scoreCarousel.scrollLeft, moved: false };
+  });
+  scoreCarousel.addEventListener("pointermove", event => {
+    if (!scoreDrag || scoreDrag.id !== event.pointerId) return;
+    const distance = event.clientX - scoreDrag.x;
+    if (!scoreDrag.moved && Math.abs(distance) < 5) return;
+    scoreDrag.moved = true;
+    scoreCarousel.setPointerCapture(event.pointerId);
+    scoreCarousel.classList.add("is-dragging");
+    scoreCarousel.scrollLeft = scoreDrag.left - distance;
+  });
+  scoreCarousel.addEventListener("pointerup", settleScoreDrag);
+  scoreCarousel.addEventListener("pointercancel", settleScoreDrag);
+  scoreCarousel.addEventListener("lostpointercapture", settleScoreDrag);
+  scoreCarousel.addEventListener("click", event => {
+    if (!suppressScoreClick) return;
+    suppressScoreClick = false;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  }, true);
+  const scoreIndex = () => Math.max(0, Math.min(scoreValues.length - 1, Math.round(scoreCarousel.scrollLeft / 64)));
+  const updateScoreSelection = () => {
+    const index = scoreIndex();
+    [...scoreCarousel.children].forEach((item, i) => item.setAttribute("aria-selected", String(i === index)));
+    scoreCarousel.setAttribute("aria-activedescendant", scoreCarousel.children[index].id);
+  };
+  scoreValues.forEach((value, index) => {
+    const item = document.createElement("div");
+    item.id = `general-score-${index}`;
+    item.setAttribute("role", "option");
+    item.textContent = value || "NA";
+    item.addEventListener("click", () => scoreCarousel.scrollTo({ left: index * 64, behavior: "instant" }));
+    scoreCarousel.append(item);
+  });
+  scoreCarousel.addEventListener("scroll", updateScoreSelection);
+  scoreCarousel.addEventListener("keydown", event => {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const index = event.key === "Home" ? 0 : event.key === "End" ? scoreValues.length - 1 : scoreIndex() + (event.key === "ArrowRight" ? 1 : -1);
+    scoreCarousel.scrollTo({ left: Math.max(0, Math.min(scoreValues.length - 1, index)) * 64, behavior: "instant" });
+  });
+  scoreCarousel.addEventListener("wheel", event => {
+    if (Math.abs(event.deltaY) <= Math.abs(event.deltaX)) return;
+    event.preventDefault();
+    scoreCarousel.scrollBy({ left: Math.sign(event.deltaY) * 64, behavior: "instant" });
+  }, { passive: false });
+  scoreLabel.append(scoreCarousel);
+  modal.append(scoreLabel);
   const wheels = [];
   for (const hole of [18, 17, 16]) {
     const label = document.createElement("h3");
@@ -1202,22 +1368,23 @@ function openHoleScores(week, teamId, trigger) {
   save.textContent = "Guardar";
   save.addEventListener("click", () => {
     if (!requireAdmin()) { modal.close(); return; }
+    const score = scoreValues[scoreIndex()];
     week.holeScores ||= {};
     week.holeScores[teamId] = Object.fromEntries(wheels.map(({hole, selectedIndex}) => [hole, HOLE_OPTIONS[selectedIndex()].value]));
-    pruneScoreTiebreaks(week);
-    syncPlacementsFromScores(week);
-    saveState(true);
-    renderPool();
-    renderPlacements();
-    renderStandings();
-    renderReport();
+    updateTeamGolfScore(week, teamId, score);
     modal.close();
   });
   actions.append(cancel, save);
   modal.append(actions);
-  modal.addEventListener("close", () => { modal.remove(); if (trigger.isConnected) trigger.focus(); });
+  modal.addEventListener("close", () => {
+    modal.remove();
+    if (trigger.isConnected) trigger.focus();
+    else [...document.querySelectorAll(".pool-score-add")].find(button => button.title === trigger.title)?.focus();
+  });
   document.body.append(modal);
   modal.showModal();
+  scoreCarousel.scrollLeft = Math.max(0, scoreValues.indexOf(normalizeGolfScore(week.scores?.[teamId]))) * 64;
+  updateScoreSelection();
   wheels.forEach(({hole, wheel, update}) => {
     wheel.scrollTop = HOLE_OPTIONS.findIndex(option => option.value === (week.holeScores?.[teamId]?.[hole] || 0)) * 40;
     update();
@@ -1548,21 +1715,76 @@ function renderPayments() {
     })
     .join("");
 
-  const activeWeekPool = prizePool(getWeek());
-  const totalPaid = totalCollected();
-  const activeWeekSummary = isFinalsWeek(getWeek())
-    ? `GRAN FINAL: ${paidCountForWeek(getWeek())} pagos x ${formatDop(state.finalWeekFee)}, bolsa ${formatDop(activeWeekPool)}`
-    : `${weekDisplayName(activeWeek)}: ${paidCountForWeek(getWeek())} pagos, bolsa ${formatDop(activeWeekPool)}`;
-  els.paymentSummary.textContent = `${inscriptionPaidCount()} inscripciones pagadas: ${formatDop(
-    finalPoolFromInscriptions(),
-  )} al pool final | Donación final: ${formatDop(
-    finalDonation(),
-  )} | ${activeWeekSummary} | Total recibido: ${formatDop(
-    totalPaid,
-  )}`;
   els.paymentTable.innerHTML = `${header}<tbody>${body}</tbody>`;
   els.paymentTable.querySelectorAll(".payment-team-name").forEach(sizePaymentName);
+  renderFinance();
 }
+
+function renderFinance() {
+  const summary = els.paymentSummary;
+  const table = document.querySelector("#financeTable");
+  if (!summary || !table) return;
+  state.finance = normalizeFinance(state.finance);
+  document.querySelector("#weeklyExpenseInput").value = state.finance.weeklyExpense;
+  const ledger = buildPaymentLedger(state);
+  const money = cents => `DOP ${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const balanceTotal = document.querySelector("#paymentBalanceTotal");
+  if (balanceTotal) balanceTotal.textContent = money(ledger.balance);
+  const weeklyReceived = ledger.rows.reduce((sum, item) => sum + item.income, 0);
+  const expenseFees = ledger.rows.reduce((sum, item) => sum + item.expenseFee, 0);
+  const metrics = [
+    ["Inscripciones recibidas", ledger.inscription, `${ledger.count} pagos × DOP 15,000`],
+    ["Reserva recibida para gastos", ledger.reserveReceived, `${ledger.count} pagos × DOP 3,000; incluida en la cuenta`],
+    ["Pagos semanales recibidos", weeklyReceived, "Incluye los pagos de la gran final"],
+    ["Aporte recibido a la final", ledger.donation, "Donaciones recibidas"],
+    ["Total recibido", ledger.receipts, "Inscripciones + reserva + pagos semanales + aporte", "subtotal"],
+    ["Transferencias realizadas", -ledger.totalTransfers, "Pool distribuido + gastos del tour"],
+    ["Comisiones de salida · 0.2%", -ledger.totalFees, "Calculadas sobre el monto completo de cada transferencia"],
+    ["Saldo esperado en cuenta", ledger.balance, "Total recibido − transferencias − comisiones", "balance"],
+    ["Gastos del tour pagados", ledger.totalExpenses, "Ya incluidos en las transferencias; no se restan otra vez"],
+    ["Comisión correspondiente a gastos", expenseFees, "Ya incluida en las comisiones de salida"],
+    ["Reserva restante para gastos", ledger.reserve, "Reserva recibida − gastos pagados − su comisión", "subtotal"],
+    ["Aporte de inscripciones a la final", moneyCents(ledger.count * 10000), "DOP 10,000 por inscripción; incluido en lo recibido"],
+  ];
+  summary.innerHTML = `<caption>Balance actual de la cuenta</caption><thead><tr><th scope="col">Concepto</th><th scope="col">Monto DOP</th><th scope="col">Detalle</th></tr></thead><tbody>`
+    + metrics.map(([label, amount, detail, style = ""]) => `<tr class="balance-${style}"><th scope="row">${label}</th><td class="balance-amount ${amount < 0 ? "balance-outgoing" : ""}">${money(amount)}</td><td class="balance-detail">${detail}</td></tr>`).join("") + "</tbody>";
+  const row = (label, cells, className = "") => `<tr class="${className}"><th scope="row">${label}</th>${cells.map(cell => `<td>${cell}</td>`).join("")}</tr>`;
+  const amounts = key => ledger.rows.map(item => money(item[key]));
+  table.innerHTML = `<caption>Movimientos semanales · saldo calculado con todas las inscripciones y aportes recibidos a la fecha</caption><thead><tr><th>Movimiento</th>${ledger.rows.map(item => `<th>${weekDisplayName(item.week)}</th>`).join("")}</tr></thead><tbody>`
+    + row("Pool semanal recibido", amounts("income"))
+    + row("Pool a distribuir", amounts("pool"))
+    + row("Restaurante / gasto del tour", ledger.rows.map(item => money(item.transferPaid ? item.expense : moneyCents(state.finance.weeklyExpense))))
+    + row("Transferencia realizada · pool + gasto", ledger.rows.map(item => `<label class="finance-paid"><input type="checkbox" data-finance-transfer="${item.week}" ${item.transferPaid ? "checked" : ""} aria-label="Transferencia realizada ${weekDisplayName(item.week)}" /><span>${money(item.transferPaid ? item.transfer : item.plannedTransfer)}</span></label>`))
+    + row("Comisión de transferencias · 0.2%", amounts("transferFee"))
+    + row("Saldo esperado en cuenta", ledger.rows.map(item => `<strong class="${item.balance < 0 ? "finance-negative" : ""}">${money(item.balance)}</strong>`), "finance-total")
+    + row("Reserva de gastos restante (incluye su comisión)", ledger.rows.map(item => `<span class="${item.reserve < 0 ? "finance-negative" : ""}">${money(item.reserve)}</span>`))
+    + "</tbody>";
+}
+
+document.querySelector("#weeklyExpenseInput")?.addEventListener("change", event => {
+  if (!requireAdmin()) return;
+  state.finance = normalizeFinance(state.finance);
+  state.finance.weeklyExpense = moneyCents(event.target.value) / 100;
+  renderFinance(); saveState(true);
+});
+document.querySelector("#financeTable")?.addEventListener("change", event => {
+  if (!requireAdmin()) return;
+  const input = event.target;
+  state.finance = normalizeFinance(state.finance);
+  if (input.dataset.financeTransfer) {
+    const week = input.dataset.financeTransfer;
+    if (input.checked) {
+      const row = buildPaymentLedger(state).rows.find(item => item.week === Number(week));
+      if (!row) return;
+      state.finance.transfers[week] = row.plannedTransfer / 100;
+      state.finance.expenses[week] = state.finance.weeklyExpense;
+    } else {
+      delete state.finance.transfers[week];
+      delete state.finance.expenses[week];
+    }
+  } else return;
+  renderFinance(); saveState(true);
+});
 
 function sizePaymentName(input) {
   const context = document.createElement("canvas").getContext("2d");

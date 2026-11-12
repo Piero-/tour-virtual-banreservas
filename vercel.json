@@ -3,6 +3,8 @@
   "buildCommand": "npm run build",
   "outputDirectory": "ClientApp/dist",
   "rewrites": [
+    { "source": "/tour-a/ruleta", "destination": "/" },
+    { "source": "/tour-c/ruleta", "destination": "/" },
     {
       "source": "/api/(.*)",
       "destination": "https://tour-virtual-banreservas-api.onrender.com/api/$1"
