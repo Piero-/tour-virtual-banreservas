@@ -1774,31 +1774,60 @@ function setupConceptReorder(table) {
     state.finance.conceptOrder = [...body.rows].map(row => row.dataset.concept);
     saveState(true);
   };
-  body.querySelectorAll(".concept-grip").forEach(handle => {
+  let drag = null;
+  table.onpointerdown = event => {
+    const handle = event.target.closest(".concept-grip");
+    if (!handle || !body.contains(handle) || !requireAdmin() || !event.isPrimary || event.button !== 0) return;
     const row = handle.closest("tr");
-    let pointer = null;
-    handle.addEventListener("pointerdown", event => {
-      if (!requireAdmin() || !event.isPrimary || event.button !== 0) return;
-      pointer = event.pointerId;
-      handle.setPointerCapture(pointer);
-      row.classList.add("is-reordering");
-      event.preventDefault();
+    const bounds = row.getBoundingClientRect();
+    const ghost = document.createElement("table");
+    ghost.className = "payment-balance-table concept-drag-preview";
+    ghost.setAttribute("aria-hidden", "true");
+    ghost.style.width = `${bounds.width}px`;
+    const ghostBody = document.createElement("tbody");
+    const clone = row.cloneNode(true);
+    [...clone.cells].forEach((cell, index) => {
+      cell.style.width = `${row.cells[index].getBoundingClientRect().width}px`;
     });
-    handle.addEventListener("pointermove", event => {
-      if (pointer !== event.pointerId) return;
+    clone.querySelectorAll("button").forEach(button => button.tabIndex = -1);
+    ghostBody.append(clone);
+    ghost.append(ghostBody);
+    document.body.append(ghost);
+    ghost.style.left = `${bounds.left}px`;
+    ghost.style.top = `${bounds.top}px`;
+    drag = { pointer: event.pointerId, row, original: [...body.rows], handle, ghost,
+      offsetX: event.clientX - bounds.left, offsetY: event.clientY - bounds.top };
+    // Capture on the stationary table: moving a captured row can lose capture.
+    table.setPointerCapture(event.pointerId);
+    row.classList.add("is-reordering");
+    event.preventDefault();
+  };
+  table.onpointermove = event => {
+      if (!drag || drag.pointer !== event.pointerId) return;
+      drag.ghost.style.left = `${event.clientX - drag.offsetX}px`;
+      drag.ghost.style.top = `${event.clientY - drag.offsetY}px`;
+      const row = drag.row;
       const target = document.elementFromPoint(event.clientX, event.clientY)?.closest("tr[data-concept]");
       if (!target || target === row || target.parentElement !== body) return;
       const rect = target.getBoundingClientRect();
       body.insertBefore(row, event.clientY > rect.top + rect.height / 2 ? target.nextSibling : target);
-    });
-    handle.addEventListener("pointerup", event => {
-      if (pointer !== event.pointerId) return;
-      pointer = null;
-      row.classList.remove("is-reordering");
-      if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
-      persist();
-    });
-    handle.addEventListener("pointercancel", () => { pointer = null; renderFinance(); });
+  };
+  const finish = (event, cancelled = false) => {
+    if (!drag || drag.pointer !== event.pointerId) return;
+    const current = drag;
+    drag = null;
+    current.ghost.remove();
+    current.row.classList.remove("is-reordering");
+    if (cancelled) current.original.forEach(row => body.append(row));
+    if (table.hasPointerCapture(event.pointerId)) table.releasePointerCapture(event.pointerId);
+    current.handle.focus({ preventScroll: true });
+    if (!cancelled) persist();
+  };
+  table.onpointerup = event => finish(event);
+  table.onpointercancel = event => finish(event, true);
+  table.onlostpointercapture = event => finish(event, true);
+  body.querySelectorAll(".concept-grip").forEach(handle => {
+    const row = handle.closest("tr");
     handle.addEventListener("keydown", event => {
       if (!["ArrowUp", "ArrowDown"].includes(event.key) || !requireAdmin()) return;
       event.preventDefault();
