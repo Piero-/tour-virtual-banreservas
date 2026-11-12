@@ -3115,6 +3115,15 @@ body {
 .modal-team-score { display: grid; gap: 8px; font-size: 13px; color: #c7d5cb; }
 .score-carousel { display: flex; gap: 8px; align-items: center; box-sizing: border-box; width: 100%; height: 72px; padding-inline: calc(50% - 28px); overflow-x: auto; overflow-y: hidden; scroll-snap-type: x mandatory; scrollbar-width: none; overscroll-behavior-x: contain; background: transparent; border-radius: 8px; }
 .score-carousel::-webkit-scrollbar { display: none; }
+.standings-panel.is-compact { display: flex; flex-direction: column; box-sizing: border-box; max-height: var(--standings-height, 600px); min-height: 0; }
+.standings-panel.is-compact > .panel-heading { flex: 0 0 auto; }
+.standings-panel.is-compact > .standings-list { min-height: 0; overflow: hidden; overflow: clip; grid-auto-rows: max-content; align-content: start; flex: 0 1 auto; padding-right: 0; -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 64px), transparent 100%); mask-image: linear-gradient(to bottom, #000 0%, #000 calc(100% - 64px), transparent 100%); }
+.standings-panel.is-compact .standing-row { min-height: 56px; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 8px; padding: 10px; box-sizing: border-box; }
+.standings-panel.is-compact .team-members { display: none; }
+.standings-panel.is-compact .standing-team { min-width: 0; }
+.standings-panel.is-compact .standing-team .name { overflow-wrap: anywhere; white-space: normal; }
+.standings-panel.is-compact .points { white-space: nowrap; }
+#toggleStandingsButton { flex-shrink: 0; width: 32px; height: 32px; font-size: 20px; }
 .score-carousel { touch-action: pan-y; user-select: none; -webkit-user-select: none; cursor: grab; }
 .score-carousel > div { cursor: grab; }
 .score-carousel.is-dragging { scroll-snap-type: none; scroll-behavior: auto; }

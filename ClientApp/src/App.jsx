@@ -206,6 +206,7 @@ export default function App() {
                 <p className="eyebrow">Overall</p>
                 <h2>Clasificación overall</h2>
               </div>
+              <button id="toggleStandingsButton" className="icon-button" type="button" aria-controls="standingsList" title="Compactar clasificación" aria-label="Compactar clasificación">−</button>
             </div>
             <div id="standingsList" className="standings-list"></div>
           </section>

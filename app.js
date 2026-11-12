@@ -453,8 +453,11 @@ function updateAccessUi() {
     els.teamEditorWrap.hidden = true;
     els.toggleNamesButton.textContent = "Editar equipos";
   } else if (els.teamEditorWrap && els.toggleNamesButton) {
+    els.teamEditorWrap.hidden = localStorage.getItem("tour-team-editor-collapsed") === "true";
     els.toggleNamesButton.textContent = els.teamEditorWrap.hidden ? "Editar equipos" : "Ocultar equipos";
   }
+  els.toggleNamesButton.setAttribute("aria-expanded", String(!els.teamEditorWrap.hidden));
+  els.toggleNamesButton.setAttribute("aria-controls", "teamEditorWrap");
 }
 
 function openAdminLoginModal() {
@@ -2797,6 +2800,8 @@ els.toggleNamesButton.addEventListener("click", () => {
   if (!requireAdmin()) return;
   const isHidden = els.teamEditorWrap.hidden;
   els.teamEditorWrap.hidden = !isHidden;
+  localStorage.setItem("tour-team-editor-collapsed", String(!isHidden));
+  els.toggleNamesButton.setAttribute("aria-expanded", String(isHidden));
   els.toggleNamesButton.textContent = isHidden ? "Ocultar equipos" : "Editar equipos";
 });
 
@@ -2810,7 +2815,28 @@ els.teamPool.addEventListener("click", () => {
   if (selectedTeamId) moveTeam(selectedTeamId, "pool");
 });
 
+const standingsPanel = document.querySelector(".standings-panel");
+const placementPanel = document.querySelector(".placement-panel");
+const standingsToggle = document.querySelector("#toggleStandingsButton");
+let standingsCompact = localStorage.getItem("tour-standings-compact") === "true";
+function updateStandingsSize() {
+  if (!standingsPanel || !placementPanel || !standingsToggle) return;
+  standingsPanel.classList.toggle("is-compact", standingsCompact);
+  const height = placementPanel.getBoundingClientRect().height;
+  if (height > 0) standingsPanel.style.setProperty("--standings-height", `${Math.max(240, height)}px`);
+  standingsToggle.textContent = standingsCompact ? "+" : "−";
+  standingsToggle.title = standingsCompact ? "Expandir clasificación" : "Compactar clasificación";
+  standingsToggle.setAttribute("aria-label", standingsToggle.title);
+  standingsToggle.setAttribute("aria-expanded", String(!standingsCompact));
+}
+standingsToggle?.addEventListener("click", () => {
+  standingsCompact = !standingsCompact;
+  localStorage.setItem("tour-standings-compact", String(standingsCompact));
+  updateStandingsSize();
+});
+if (placementPanel) new ResizeObserver(updateStandingsSize).observe(placementPanel);
 render();
+updateStandingsSize();
 window.setInterval(pollForRemoteUpdates, SYNC_POLL_INTERVAL_MS);
 sendPresenceHeartbeat();
 window.setInterval(sendPresenceHeartbeat, PRESENCE_HEARTBEAT_INTERVAL_MS);
