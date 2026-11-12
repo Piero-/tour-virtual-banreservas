@@ -3193,25 +3193,29 @@ body {
 .hole-score-modal .modal-actions { margin-top: 20px; }
 .hole-score-summary:focus-visible, .hole-score-wheel:focus-visible { outline: 2px solid #699c81; outline-offset: 2px; }
 div.hole-score-summary { cursor: default; }
-.place-card.podium-card :is(.score-editor, .tiebreak-editor) {
-  color: #f3ebd4;
-  background: #183127;
+.place-card { --score-surface: #183127; --score-input: #10231b; --score-text: #f3ebd4; --score-muted: #b7c5bb; --score-border: #6d8878; --score-focus: #a5d6b8; }
+.place-card.medal-gold { --score-surface: #e8cd87; --score-input: #fff0c4; --score-text: #35270d; --score-muted: #695326; --score-border: #917335; --score-focus: #584015; }
+.place-card.medal-silver { --score-surface: #cbd2cf; --score-input: #edf1ee; --score-text: #202b27; --score-muted: #4b5b54; --score-border: #75877e; --score-focus: #354e41; }
+.place-card.medal-bronze { --score-surface: #3b302b; --score-input: #261f1c; --score-text: #f6e5d5; --score-muted: #cfb6a3; --score-border: #8a6d59; --score-focus: #e1b893; }
+.place-card :is(.score-editor, .tiebreak-editor) {
+  color: var(--score-text);
+  background: var(--score-surface);
   border-radius: 6px;
   padding: 6px;
 }
-.place-card.podium-card :is(.score-badge, .hole-score-summary) {
-  color: #d6e0d8;
-  background: #183127;
-  border-color: #425b4d;
+.place-card :is(.score-badge, .hole-score-summary) {
+  color: var(--score-text);
+  background: var(--score-surface);
+  border-color: var(--score-border);
 }
-.place-card.podium-card .hole-score-summary strong { color: #f3ebd4; }
-.place-card.podium-card .score-badge { color: #f3ebd4; }
-.place-card.podium-card :is(.score-editor input, .tiebreak-editor select) {
-  background: #10231b;
-  color: #f3ebd4;
-  border-color: #6d8878;
+.place-card .hole-score-summary strong { color: var(--score-text); }
+.place-card :is(.score-editor input, .tiebreak-editor select) {
+  background: var(--score-input);
+  color: var(--score-text);
+  border-color: var(--score-border);
 }
-.place-card.podium-card .score-editor input::placeholder { color: #b7c5bb; }
+.place-card .score-editor input::placeholder { color: var(--score-muted); }
+.place-card :is(.score-editor input, .tiebreak-editor select, .hole-score-summary):focus-visible { outline: 2px solid var(--score-focus); outline-offset: 2px; box-shadow: none; border-color: var(--score-focus); }
 .app-shell[hidden] { display: none; }
 .roulette-launch { display: flex; justify-content: flex-end; padding: 28px 0; }
 .roulette-page {
