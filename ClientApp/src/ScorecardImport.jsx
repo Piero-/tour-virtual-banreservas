@@ -248,10 +248,7 @@ export default function ScorecardImport({ mobileCameraSlot }) {
       <div className="scorecard-import-top">
       <div className="scorecard-heading">
         <div><p className="eyebrow">{context?.label}</p><h2 id="scorecardTitle">Importar tarjetas de score</h2></div>
-        <button type="button" className="icon-button scorecard-dismiss" aria-label="Cerrar" onClick={() => dialog.current.close()}>
-          <span aria-hidden="true">×</span>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
-        </button>
+        <button type="button" className="icon-button" aria-label="Cerrar" onClick={() => dialog.current.close()}>×</button>
       </div>
       <div className="scorecard-mobile-paste">
         <button type="button" className="button primary" disabled={readingClipboard} onClick={() => void pasteFromClipboard()}>

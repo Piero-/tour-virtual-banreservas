@@ -3170,11 +3170,7 @@ body {
 .scorecard-drop > span { font-size: 20px; }
 .scorecard-drop > small { color: #b8c9be; }
 .scorecard-mobile-paste, .scorecard-mobile-count { display: none; }
-.scorecard-dismiss svg { display: none; }
 @media (max-width: 680px) {
-  .scorecard-dismiss { display: inline-grid; place-items: center; }
-  .scorecard-dismiss span { display: none; }
-  .scorecard-dismiss svg { display: block; }
   .scorecard-import.hole-score-modal { inset: auto 0 0; width: 100%; max-width: none; max-height: calc(100dvh - max(24px, env(safe-area-inset-top))); margin: 0; padding: 0 16px max(14px, env(safe-area-inset-bottom)); border-radius: 8px 8px 0 0; border-inline: 0; border-bottom: 0; overscroll-behavior: contain; }
   .scorecard-import-top { position: sticky; top: 0; z-index: 2; margin: 0 -16px 8px; padding: 14px 16px 12px; border-bottom: 1px solid #385246; background: #10231b; }
   .scorecard-import-top .eyebrow { margin: 0 0 4px; }
@@ -3434,6 +3430,8 @@ div.hole-score-summary { cursor: default; }
 .payment-balance-wrap { margin: 0 0 16px; border-block: 1px solid #385246; }
 .payments-heading-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 .payments-panel .payments-heading-actions .button { width: auto; min-height: 40px; padding: 7px 10px; font-size: 12px; }
+.payments-panel .payments-heading-actions .payments-collapse-button { display: inline-grid; place-items: center; width: 44px; min-width: 44px; min-height: 44px; padding: 0; }
+.payments-collapse-button[aria-expanded="true"] svg { transform: rotate(180deg); }
 .payments-heading-actions [hidden], #weeklyTransferActions[hidden], #paymentsContent[hidden] { display: none; }
 .payment-balance-header:has(#weeklyTransferActions[hidden]) .payment-balance-wrap { margin-bottom: 0; }
 .weekly-transfer-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-bottom: 16px; }

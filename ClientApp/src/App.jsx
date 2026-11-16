@@ -259,7 +259,10 @@ export default function App() {
             <div className="payments-heading-actions">
               <button id="showWeeksButton" className="button secondary admin-only" type="button" hidden={paymentsCollapsed}>Mostrar semanas</button>
               <button className="button secondary payments-collapse-button" type="button" aria-controls="paymentsContent" aria-expanded={!paymentsCollapsed}
-                onClick={() => setPaymentsCompact(!paymentsCollapsed)}>{paymentsCollapsed ? "Expandir pagos" : "Colapsar pagos"}</button>
+                aria-label={paymentsCollapsed ? "Expandir pagos" : "Colapsar pagos"} title={paymentsCollapsed ? "Expandir pagos" : "Colapsar pagos"}
+                onClick={() => setPaymentsCompact(!paymentsCollapsed)}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+              </button>
             </div>
           </div>
           <div className="payment-balance-header">
