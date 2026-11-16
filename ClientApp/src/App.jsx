@@ -251,19 +251,15 @@ export default function App() {
         </section>
 
         <section className="panel payments-panel admin-only" data-section="payments">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Pagos</p>
-              <h2>Pagos por equipo</h2>
-            </div>
-            <div className="payments-heading-actions">
-              <button id="showWeeksButton" className="button secondary admin-only" type="button" hidden={paymentsCollapsed}>Mostrar semanas</button>
-              <button className="button secondary payments-collapse-button" type="button" aria-controls="paymentsContent" aria-expanded={!paymentsCollapsed}
-                aria-label={paymentsCollapsed ? "Expandir pagos" : "Colapsar pagos"} title={paymentsCollapsed ? "Expandir pagos" : "Colapsar pagos"}
+          <div className="panel-heading payments-heading">
+            <h2>
+              <button className="payments-collapse-button" type="button" aria-controls="paymentsContent" aria-expanded={!paymentsCollapsed}
                 onClick={() => setPaymentsCompact(!paymentsCollapsed)}>
+                <span className="eyebrow" aria-hidden="true">Pagos</span>
+                <span className="payments-heading-title">Pagos por equipo</span>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
               </button>
-            </div>
+            </h2>
           </div>
           <div className="payment-balance-header">
           <details className="payment-balance-wrap" ref={paymentBalance}>
@@ -279,6 +275,9 @@ export default function App() {
           </div>
           </div>
           <div id="paymentsContent" hidden={paymentsCollapsed}>
+          <div className="payments-heading-actions">
+            <button id="showWeeksButton" className="button secondary admin-only" type="button">Mostrar semanas</button>
+          </div>
           <div className="table-scroll payment-scroll">
             <table id="paymentTable" className="payment-table"></table>
           </div>
