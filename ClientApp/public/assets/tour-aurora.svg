@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1440 480" preserveAspectRatio="none">
+  <defs>
+    <linearGradient id="light" x2="0" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#158367" stop-opacity="0"/>
+      <stop offset=".38" stop-color="#12856a" stop-opacity=".21"/>
+      <stop offset=".68" stop-color="#30b28a" stop-opacity=".5"/>
+      <stop offset=".86" stop-color="#78ceb0" stop-opacity=".68"/>
+      <stop offset="1" stop-color="#b1e1ba" stop-opacity=".78"/>
+    </linearGradient>
+    <linearGradient id="edge">
+      <stop stop-color="#62be9e" stop-opacity=".08"/>
+      <stop offset=".28" stop-color="#64d4a5"/>
+      <stop offset=".55" stop-color="#e0c68b"/>
+      <stop offset=".76" stop-color="#68cba8"/>
+      <stop offset="1" stop-color="#219479" stop-opacity=".12"/>
+    </linearGradient>
+    <filter id="soft"><feGaussianBlur stdDeviation="11"/></filter>
+    <filter id="rim"><feGaussianBlur stdDeviation="2.4"/></filter>
+    <path id="crest" d="M-100 148 C35 148 100 233 220 211 S355 100 490 159 S640 269 765 220 S895 111 1025 159 S1160 247 1285 204 S1430 119 1540 164"/>
+    <path id="curtain" d="M-100 25 C35 25 100 110 220 88 S355 -23 490 36 S640 146 765 97 S895 -12 1025 36 S1160 124 1285 81 S1430 -4 1540 41 L1540 164 C1430 119 1410 161 1285 204 S1155 207 1025 159 S890 171 765 220 S625 218 490 159 S340 189 220 211 S35 148 -100 148Z"/>
+    <pattern id="fibers" width="61" height="12" patternUnits="userSpaceOnUse" patternTransform="rotate(13)">
+      <path d="M2 0v12 M12 0v12 M15 0v12 M30 0v12 M48 0v12 M56 0v12" stroke="#b5eacc" stroke-opacity=".19" stroke-width="1"/>
+      <path d="M8 0v12 M25 0v12 M41 0v12" stroke="#69c099" stroke-opacity=".23" stroke-width="3"/>
+    </pattern>
+    <mask id="texture"><use href="#curtain" fill="url(#light)"/></mask>
+  </defs>
+  <g transform="translate(0 61)">
+    <use href="#curtain" fill="url(#light)" filter="url(#soft)"/>
+    <use href="#curtain" fill="url(#light)" opacity=".43"/>
+    <rect width="1440" height="310" fill="url(#fibers)" mask="url(#texture)"/>
+    <use href="#crest" fill="none" stroke="url(#edge)" stroke-width="7" opacity=".63" filter="url(#rim)"/>
+  </g>
+  <g transform="translate(0 5) scale(1 .71)" opacity=".54">
+    <use href="#curtain" fill="url(#light)" filter="url(#soft)"/>
+    <use href="#crest" fill="none" stroke="url(#edge)" stroke-width="5" filter="url(#rim)"/>
+  </g>
+</svg>

@@ -15,6 +15,22 @@ function category() {
     weeks: [{ paidTeamIds: ['a'] }, { paidTeamIds: [] }],
     finance: { weeklyExpense: 1000, expenses: {}, transfers: {} } };
 }
+test('Pool and expense transfers are independent and charge their own fees', () => {
+  const state = category();
+  state.finance.poolTransfers = { 1: 6000 };
+  let ledger = context.buildPaymentLedger(state);
+  assert.equal(ledger.rows[0].poolPaid, true);
+  assert.equal(ledger.rows[0].expensePaid, false);
+  assert.equal(ledger.rows[0].transferFee, 1200);
+  state.finance.expenseTransfers = { 1: 1000 };
+  delete state.finance.poolTransfers[1];
+  ledger = context.buildPaymentLedger(state);
+  assert.equal(ledger.rows[0].poolPaid, false);
+  assert.equal(ledger.rows[0].expensePaid, true);
+  assert.equal(ledger.rows[0].transfer, 100000);
+  assert.equal(ledger.reserve, 199800);
+  assert.equal(ledger.rows[1].expensePaid, false);
+});
 test('Concept order survives normalization and removes duplicates', () => {
   const saved = { conceptOrder: ['Pagos a Hoyo 20', 'Total recibido', 'Total recibido', null] };
   const result = context.normalizeFinance(JSON.parse(JSON.stringify(saved)));

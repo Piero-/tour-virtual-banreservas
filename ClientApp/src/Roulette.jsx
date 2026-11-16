@@ -42,7 +42,7 @@ export default function Roulette() {
   const [result, setResult] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
-  const [allowed, setAllowed] = useState(Boolean(window.TOUR_USER));
+  const [allowed, setAllowed] = useState(window.TOUR_USER?.username === "piero" || window.TOUR_USER?.rouletteEnabled === true);
   const [ready, setReady] = useState(Boolean(window.completeRoulette));
   const timer = useRef(null);
   const confirmation = useRef(null);
@@ -58,7 +58,12 @@ export default function Roulette() {
     const check = async () => {
       try {
         const response = await fetch(window.TOUR_API_AUTH_URL.replace(/\/login$/, "/session"), { headers: { Authorization: `Bearer ${localStorage.getItem("tour-admin-token") || ""}` }, cache: "no-store" });
-        if (response.status === 401) { setAllowed(false); confirmation.current?.close(); }
+        if (response.status === 401 || response.ok) {
+          const user = response.ok ? await response.json() : null;
+          const access = user?.username === "piero" || user?.rouletteEnabled === true;
+          setAllowed(access);
+          if (!access) confirmation.current?.close();
+        }
       } catch { /* Final registration also validates the session. */ }
     };
     const interval = setInterval(check, 15000);

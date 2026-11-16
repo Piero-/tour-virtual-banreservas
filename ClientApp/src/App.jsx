@@ -56,7 +56,7 @@ export default function App() {
       const { downloadSeasonPdf } = await import("./season-pdf");
       return downloadSeasonPdf(archive);
     };
-    script.src = "/legacy-app.js?v=20261111-roulette";
+    script.src = "/legacy-app.js?v=20261115-week-confirmation";
     script.async = false;
     document.body.appendChild(script);
   }, [ready]);
@@ -84,7 +84,7 @@ export default function App() {
   return (
     <>
       <main className="app-shell" hidden={roulettePage}>
-        <header className="topbar">
+        <header className="topbar tour-topbar">
           <div className="brand-lockup">
             <div className="brand-mark">
               <img src="/assets/pnglogo.png" alt="HOYO 20" />
@@ -94,15 +94,15 @@ export default function App() {
               <h1>Tour Virtual Hoyo 20</h1>
             </div>
           </div>
-          <div className="golf-art" aria-hidden="true">
-            <span className="art-scorecard"></span>
-            <span className="art-fairway"></span>
-            <span className="art-pin"></span>
-            <span className="art-moon"></span>
-            <span className="art-line art-line-one"></span>
-            <span className="art-line art-line-two"></span>
-          </div>
           <div className="topbar-actions">
+            <label className="field public-category">
+              <span>Categoría</span>
+              <select id="publicCategorySelect"><option value="A">A, B y C</option><option value="C">C</option></select>
+            </label>
+            <button className="button secondary admin-only" type="button" aria-haspopup="dialog" onClick={() => document.getElementById("tourSettings").showModal()}>Configuración del tour</button>
+            <dialog id="tourSettings" className="hole-score-modal tour-settings" aria-labelledby="tourSettingsTitle">
+              <h2 id="tourSettingsTitle">Configuración del tour</h2>
+              <div className="tour-settings-fields">
             <label className="field compact">
               <span>Categoría</span>
               <select id="categorySelect">
@@ -118,6 +118,21 @@ export default function App() {
               <span>Semanas</span>
               <input id="weekLimitInput" type="number" min="1" max="11" defaultValue="11" />
             </label>
+            <label className="field compact admin-only">
+              <span>Fecha de inicio</span>
+              <input id="startDateInput" type="date" />
+            </label>
+            <label className="switch admin-only">
+              <input id="doubleToggle" type="checkbox" />
+              <span className="switch-track"></span>
+              <span>Penúltima semana x2</span>
+            </label>
+              </div>
+              <div className="tour-settings-users admin-only">
+                <button id="manageUsersButton" className="button secondary" type="button" hidden>Usuarios</button>
+              </div>
+              <form method="dialog" className="modal-actions"><button className="button secondary">Cerrar</button></form>
+            </dialog>
             <details className="action-menu admin-only" hidden>
               <summary className="button menu-trigger">Datos</summary>
               <div className="action-menu-list">
@@ -127,43 +142,46 @@ export default function App() {
               </div>
             </details>
             <input id="importDataInput" type="file" accept="application/json,.json" hidden />
-            <details className="action-menu admin-only">
+            <details className="action-menu tour-reports admin-only">
               <summary className="button menu-trigger">Reportes</summary>
               <div className="action-menu-list">
                 <button id="downloadWeekButton" className="menu-button" type="button">Reporte semana</button>
                 <button id="downloadOverallButton" className="menu-button" type="button">Reporte overall</button>
               </div>
             </details>
-            <div id="presenceDots" className="presence-dots" aria-label="Personas viendo en vivo"></div>
-            <button id="manageUsersButton" className="button secondary" type="button" hidden>Usuarios</button>
             <div className="session-actions">
               <button id="loginButton" className="login-button" type="button">Login</button>
               <button id="signOutButton" className="sign-out-button" type="button" hidden>Cerrar sesión</button>
             </div>
           </div>
+          <details className="action-menu live-presence" hidden>
+            <summary id="presenceCount" aria-label="Personas viendo en vivo">0 en vivo</summary>
+            <ul className="action-menu-list" id="presenceDots" aria-label="Personas viendo en vivo"></ul>
+          </details>
+          <span id="presenceStatus" className="live-presence live-status" hidden></span>
         </header>
 
         <section className="control-strip" aria-label="Controles de semana">
+          <div className="week-order-actions">
           <label className="field">
             <span>Semana activa</span>
             <select id="weekSelect"></select>
           </label>
-          <label className="field compact admin-only">
-            <span>Fecha de inicio</span>
-            <input id="startDateInput" type="date" />
-          </label>
-          <label className="switch">
-            <input id="doubleToggle" type="checkbox" />
-            <span className="switch-track"></span>
-            <span>Penúltima semana x2</span>
-          </label>
+          <button className="button secondary section-order-button admin-only" type="button" aria-haspopup="dialog" onClick={() => document.getElementById("sectionOrderDialog").showModal()}>Orden de secciones</button>
+          </div>
           <div className="current-week-score">
             <span>Asignados esta semana</span>
             <strong id="weekAssignedCount">0 / 12</strong>
           </div>
         </section>
 
-        <section className="workspace-grid">
+        <dialog id="sectionOrderDialog" className="hole-score-modal section-preferences" aria-labelledby="sectionOrderTitle">
+          <h2 id="sectionOrderTitle">Orden de secciones</h2>
+          <ol id="sectionOrderControls"></ol>
+          <form method="dialog" className="modal-actions"><button className="button secondary">Cerrar</button></form>
+        </dialog>
+        <div id="tourSections">
+        <section className="workspace-grid" data-section="results">
           <aside className="panel roster-panel admin-only">
             <div className="panel-heading">
               <div>
@@ -212,7 +230,7 @@ export default function App() {
           </section>
         </section>
 
-        <section className="panel payments-panel admin-only">
+        <section className="panel payments-panel admin-only" data-section="payments">
           <div className="panel-heading">
             <div>
               <p className="eyebrow">Pagos</p>
@@ -220,18 +238,33 @@ export default function App() {
             </div>
             <button id="showWeeksButton" className="button secondary admin-only" type="button">Mostrar semanas</button>
           </div>
+          <div className="payment-balance-header">
           <details className="payment-balance-wrap">
-            <summary>Balance de la cuenta <span id="paymentBalanceTotal"></span></summary>
+            <summary>
+              <span className="balance-summary-heading"><span>Balance de la cuenta</span><strong id="paymentBalanceTotal"></strong></span>
+              <span id="paymentBalanceProgress" className="balance-summary-meters"></span>
+            </summary>
             <table id="paymentSummary" className="payment-balance-table" aria-live="polite"></table>
           </details>
+          <div id="weeklyTransferActions" className="weekly-transfer-actions" role="group" aria-label="Transferencias de la semana activa">
+            <button type="button" className="button secondary" data-transfer-kind="pool" aria-pressed="false">Pool transferido</button>
+            <button type="button" className="button secondary" data-transfer-kind="expense" aria-pressed="false">Gasto transferido</button>
+          </div>
+          </div>
           <div className="table-scroll payment-scroll">
             <table id="paymentTable" className="payment-table"></table>
           </div>
           <details className="payment-finance" id="paymentFinance">
             <summary>Movimientos y balance</summary>
             <div className="finance-settings">
-              <label className="field"><span>Gasto semanal previsto · DOP</span><input id="weeklyExpenseInput" type="number" min="0" step="0.01" defaultValue="0" /></label>
-              <label className="field"><span>Aporte recibido a la final · DOP</span><input id="finalDonationInput" type="number" min="0" step="0.01" defaultValue="0" /></label>
+              <label className="field finance-field">
+                <span>Gasto semanal previsto</span>
+                <span className="finance-amount-input"><span>DOP</span><input id="weeklyExpenseInput" type="number" inputMode="decimal" min="0" step="0.01" defaultValue="0" /></span>
+              </label>
+              <label className="field finance-field">
+                <span>Aporte recibido a la final</span>
+                <span className="finance-amount-input"><span>DOP</span><input id="finalDonationInput" type="number" inputMode="decimal" min="0" step="0.01" defaultValue="0" /></span>
+              </label>
             </div>
             <div className="table-scroll payment-scroll"><table id="financeTable" className="finance-table"></table></div>
           </details>
@@ -241,6 +274,7 @@ export default function App() {
           </details>
         </section>
 
+        <div data-section="history">
         <section className="panel report-panel">
           <div className="panel-heading">
             <div>
@@ -273,7 +307,20 @@ export default function App() {
           </div>
           <div id="seasonArchiveList"></div>
         </section>
-        <footer className="roulette-launch admin-only"><button id="openRouletteButton" className="button secondary" type="button">Ruleta de equipos</button></footer>
+        </div>
+        </div>
+        <footer className="roulette-launch admin-only">
+          <label id="rouletteAccessControl" className="switch" title="Permitir ruleta a otros administradores" hidden><input id="rouletteAccessToggle" type="checkbox" role="switch" aria-label="Permitir ruleta a otros administradores" /><span className="switch-track" aria-hidden="true"></span></label>
+          <button id="openRouletteButton" className="button secondary" type="button" hidden>Ruleta de equipos</button>
+        </footer>
+        <dialog id="rouletteAccessWarning" className="hole-score-modal" aria-labelledby="rouletteAccessTitle">
+          <h2 id="rouletteAccessTitle">¿Habilitar la ruleta?</h2>
+          <p>Los otros administradores podrán iniciar sorteos y registrar una nueva temporada. Al completar el registro, se puede archivar y reemplazar el tour actual.</p>
+          <form method="dialog" className="modal-actions">
+            <button className="button secondary" value="cancel" autoFocus>Cancelar</button>
+            <button className="button primary" value="enable">Habilitar acceso</button>
+          </form>
+        </dialog>
       </main>
       {roulettePage && <Roulette />}
 

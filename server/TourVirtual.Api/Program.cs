@@ -99,8 +99,52 @@ app.MapGet("/api/auth/session", async (HttpContext context, AppDbContext db) =>
 {
     context.Response.Headers.CacheControl = "no-store";
     var user = await UserAuth.Current(context, db);
-    return user is null ? Results.Unauthorized() : Results.Ok(new { username = user.Username, canManageUsers = user.Username == "piero" });
+    return user is null ? Results.Unauthorized() : Results.Ok(new { username = user.Username, canManageUsers = user.Username == "piero", rouletteEnabled = await RouletteEnabled(db) });
 });
+
+app.MapPut("/api/roulette-access", async ([Microsoft.AspNetCore.Mvc.FromBody] bool enabled, HttpContext context, AppDbContext db) =>
+{
+    var user = await UserAuth.Current(context, db);
+    if (user is null) return Results.Unauthorized();
+    if (user.Username != "piero") return Results.StatusCode(403);
+    await SavePreference(db, "roulette-access", enabled ? "true" : "false");
+    return Results.NoContent();
+});
+
+app.MapGet("/api/section-order", async (HttpContext context, AppDbContext db) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var user = await UserAuth.Current(context, db);
+    if (user is null) return Results.Unauthorized();
+    var row = await db.AppStates.AsNoTracking().FirstOrDefaultAsync(item => item.Key == "section-order:" + user.Username);
+    return Results.Text(row?.Json ?? "null", "application/json");
+});
+
+app.MapPut("/api/section-order", async (string[] order, HttpContext context, AppDbContext db) =>
+{
+    var user = await UserAuth.Current(context, db);
+    if (user is null) return Results.Unauthorized();
+    if (order.Length != 3 || !new HashSet<string>(order).SetEquals(new[] { "results", "payments", "history" }))
+        return Results.BadRequest();
+    await SavePreference(db, "section-order:" + user.Username, JsonSerializer.Serialize(order));
+    return Results.NoContent();
+});
+
+static Task<bool> RouletteEnabled(AppDbContext db) =>
+    db.AppStates.AnyAsync(item => item.Key == "roulette-access" && item.Json == "true");
+
+static async Task SavePreference(AppDbContext db, string key, string json)
+{
+    var row = await db.AppStates.FirstOrDefaultAsync(item => item.Key == key);
+    if (row is null)
+    {
+        row = new AppStateRecord { Key = key };
+        db.AppStates.Add(row);
+    }
+    row.Json = json;
+    row.UpdatedAt = DateTimeOffset.UtcNow;
+    await db.SaveChangesAsync();
+}
 
 app.MapGet("/api/users", async (HttpContext context, AppDbContext db) =>
 {
@@ -170,6 +214,7 @@ app.MapPost("/api/season-registration", async (JsonElement payload, HttpContext 
 {
     var user = await UserAuth.Current(context, db);
     if (user is null) return Results.Unauthorized();
+    if (user.Username != "piero" && !await RouletteEnabled(db)) return Results.StatusCode(403);
     var request = JsonNode.Parse(payload.GetRawText()) as JsonObject;
     if (request?["category"] is not JsonValue categoryValue || !categoryValue.TryGetValue<string>(out var category)
         || (category != "A" && category != "C")

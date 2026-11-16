@@ -27,7 +27,7 @@ const ADMIN_TOKEN_KEY = "tour-admin-token";
 const SYNC_POLL_INTERVAL_MS = 5000;
 const LOCAL_SAVE_GRACE_MS = 2500;
 const PRESENCE_HEARTBEAT_INTERVAL_MS = 15000;
-const PRESENCE_MAX_DOTS = 18;
+const PRESENCE_MAX_NAMES = 18;
 const AUTO_WEEK_CHECK_INTERVAL_MS = 60000;
 
 const defaultTeams = Array.from({ length: MAX_TEAMS }, (_, index) => ({
@@ -50,6 +50,7 @@ let lastKnownStateJson = JSON.stringify(appState);
 const viewerId = getViewerId();
 let adminToken = localStorage.getItem(ADMIN_TOKEN_KEY) || "";
 let currentUser = window.TOUR_USER || null;
+let rouletteEnabled = currentUser?.rouletteEnabled === true;
 let adminView = localStorage.getItem("tour-admin-view") !== "viewer";
 
 const els = {
@@ -190,6 +191,7 @@ function normalizeFinance(saved = {}) {
     .map(([week, amount]) => [week, moneyCents(amount) / 100]));
   return { weeklyExpense: moneyCents(saved?.weeklyExpense) / 100,
     expenses: amounts(saved?.expenses), transfers: amounts(saved?.transfers),
+    poolTransfers: amounts(saved?.poolTransfers), expenseTransfers: amounts(saved?.expenseTransfers),
     conceptOrder: Array.isArray(saved?.conceptOrder) ? [...new Set(saved.conceptOrder.filter(value => typeof value === "string"))].slice(0, 30) : [] };
 }
 
@@ -207,17 +209,22 @@ function buildPaymentLedger(category) {
   const rows = category.weeks.slice(0, category.weekLimit).map((week, index) => {
     const number = index + 1;
     const income = moneyCents(countPaid(week.paidTeamIds) * (number === category.weekLimit ? category.finalWeekFee : REGULAR_WEEK_FEE_DOP));
-    const transferPaid = Object.hasOwn(finance.transfers, number);
-    const expense = transferPaid ? moneyCents(finance.expenses[number]) : 0;
+    const legacyTransfer = Object.hasOwn(finance.transfers, number);
+    const poolPaid = legacyTransfer || Object.hasOwn(finance.poolTransfers, number);
+    const expensePaid = legacyTransfer || Object.hasOwn(finance.expenseTransfers, number);
+    const expense = moneyCents(legacyTransfer ? finance.expenses[number] : finance.expenseTransfers[number]);
     const pool = income + (number === category.weekLimit ? moneyCents(count * 10000) + donation : 0);
     const plannedTransfer = pool + moneyCents(finance.weeklyExpense);
-    const transfer = moneyCents(finance.transfers[number]);
-    const expenseFee = Math.round(expense * 0.002);
-    const transferFee = Math.round(transfer * 0.002);
+    const poolTransfer = legacyTransfer
+      ? Math.max(0, moneyCents(finance.transfers[number]) - expense)
+      : moneyCents(finance.poolTransfers[number]);
+    const transfer = legacyTransfer ? moneyCents(finance.transfers[number]) : poolTransfer + expense;
+    const transferFee = legacyTransfer ? Math.round(transfer * 0.002)
+      : Math.round(poolTransfer * 0.002) + Math.round(expense * 0.002);
     balance += income - transfer - transferFee;
     reserve -= expense + transferFee;
     receipts += income; totalExpenses += expense; totalTransfers += transfer; totalFees += transferFee;
-    return { week: number, income, pool, plannedTransfer, expense, transfer, expenseFee, transferFee, balance, reserve, transferPaid };
+    return { week: number, income, pool, plannedTransfer, expense, transfer, poolTransfer, transferFee, balance, reserve, poolPaid, expensePaid };
   });
   return { count, inscription, reserveReceived, donation, receipts, totalExpenses, totalTransfers, totalFees, balance, reserve, rows };
 }
@@ -434,6 +441,18 @@ function updateAccessUi() {
   const isAdmin = isAdminMode();
   document.body.classList.toggle("is-viewer", !isAdmin);
   document.body.classList.toggle("is-admin", isAdmin);
+  const presenceMenu = document.querySelector(".action-menu.live-presence");
+  const presenceStatus = document.querySelector("#presenceStatus");
+  if (presenceMenu && presenceStatus?.textContent) {
+    const signedIn = Boolean(adminToken && currentUser);
+    presenceMenu.hidden = !signedIn;
+    presenceStatus.hidden = signedIn;
+    if (!signedIn) {
+      presenceMenu.open = false;
+      els.presenceDots?.replaceChildren();
+    }
+  }
+  updateTourPreferences();
 
   if (els.loginButton) {
     els.loginButton.textContent = adminToken ? (isAdmin ? "Vista pública" : "Vista admin") : "Login";
@@ -613,28 +632,27 @@ async function sendPresenceHeartbeat() {
 
 function renderPresenceDots(count, viewers = []) {
   if (!els.presenceDots) return;
-
-  const visibleDots = Math.min(count, PRESENCE_MAX_DOTS);
-  els.presenceDots.innerHTML = "";
-  els.presenceDots.title = `${count} persona${count === 1 ? "" : "s"} viendo en vivo`;
-
-  Array.from({ length: visibleDots }).forEach((_, index) => {
-    const dot = document.createElement("span");
-    dot.className = "presence-dot";
-    const name = viewers[index]?.name || "Visitante";
-    dot.title = name;
-    dot.setAttribute("aria-label", `${name} viendo en vivo`);
-    dot.setAttribute("data-name", name);
-    dot.tabIndex = 0;
-    els.presenceDots.append(dot);
-  });
-
-  if (count > PRESENCE_MAX_DOTS) {
-    const overflow = document.createElement("span");
-    overflow.className = "presence-overflow";
-    overflow.textContent = `+${count - PRESENCE_MAX_DOTS}`;
-    els.presenceDots.append(overflow);
+  const summary = document.querySelector("#presenceCount");
+  const status = document.querySelector("#presenceStatus");
+  if (!summary || !status) return;
+  const signedIn = Boolean(adminToken && currentUser);
+  summary.closest("details").hidden = !signedIn;
+  status.hidden = signedIn;
+  status.textContent = `${count} en vivo`;
+  summary.textContent = `${count} en vivo`;
+  summary.setAttribute("aria-label", `${count} persona${count === 1 ? "" : "s"} viendo en vivo`);
+  if (!signedIn) {
+    els.presenceDots.replaceChildren();
+    return;
   }
+  const names = Array.from({ length: Math.min(count, PRESENCE_MAX_NAMES) }, (_, index) => viewers[index]?.name || "Visitante");
+  if (!count) names.push("Sin personas conectadas");
+  if (count > PRESENCE_MAX_NAMES) names.push(`+${count - PRESENCE_MAX_NAMES} más`);
+  els.presenceDots.replaceChildren(...names.map(name => {
+    const item = document.createElement("li");
+    item.textContent = name;
+    return item;
+  }));
 }
 
 function showToast(message, variant = "success") {
@@ -816,6 +834,8 @@ function render() {
   applyAutoWeekFromStartDate();
   updateAccessUi();
   els.categorySelect.value = appState.activeCategory;
+  const publicCategory = document.querySelector("#publicCategorySelect");
+  if (publicCategory) publicCategory.value = appState.activeCategory;
   els.teamCountInput.value = state.teamCount;
   els.weekLimitInput.value = state.weekLimit;
   els.startDateInput.value = state.startDate || "";
@@ -931,6 +951,8 @@ function seasonAlreadyArchived(category, archives, categoryId) {
   const hasActivity = Boolean(category.finalDonation || category.startDate)
     || Object.values(category.finance?.expenses || {}).some(Boolean)
     || Object.values(category.finance?.transfers || {}).some(Boolean)
+    || Object.values(category.finance?.poolTransfers || {}).some(Boolean)
+    || Object.values(category.finance?.expenseTransfers || {}).some(Boolean)
     || category.inscriptionPaidTeamIds.length > 0 || category.weeks.some(week =>
     week.paidTeamIds.length || week.placements.some(Boolean) || Object.keys(week.scores || {}).length || Object.keys(week.holeScores || {}).length);
   return !hasActivity && JSON.stringify(category.teams) === JSON.stringify(latest.snapshot.teams);
@@ -964,7 +986,7 @@ window.completeRoulette = async ({ id, teams }) => {
   if (!saved.ok) throw new Error("No se pudo registrar. El tour actual no se ha reemplazado.");
 };
 document.querySelector("#openRouletteButton")?.addEventListener("click", async () => {
-  if (!requireAdmin()) return;
+  if (!requireAdmin() || !await refreshRouletteAccess()) return;
   saveState(true);
   await apiSaveChain;
   window.location.assign(`${CATEGORY_ROUTES[appState.activeCategory]}/ruleta`);
@@ -1732,19 +1754,54 @@ function renderFinance() {
   state.finance = normalizeFinance(state.finance);
   document.querySelector("#weeklyExpenseInput").value = state.finance.weeklyExpense;
   const ledger = buildPaymentLedger(state);
-  const money = cents => `DOP ${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const money = cents => `DOP ${((cents || 0) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const balanceTotal = document.querySelector("#paymentBalanceTotal");
-  if (balanceTotal) balanceTotal.textContent = money(ledger.balance);
+  const compactMoney = cents => {
+    const amount = Math.abs(cents) / 100;
+    const value = amount >= 1000
+      ? `${(amount / 1000).toLocaleString("en-US", { maximumFractionDigits: 2 })}k`
+      : amount.toLocaleString("en-US", { maximumFractionDigits: 2 });
+    return `${cents < 0 ? "−" : ""}$${value}`;
+  };
+  if (balanceTotal) {
+    balanceTotal.textContent = money(ledger.balance).replace("DOP ", "$");
+    balanceTotal.title = money(ledger.balance);
+  }
   const weeklyReceived = ledger.rows.reduce((sum, item) => sum + item.income, 0);
+  const activeFee = activeWeek === state.weekLimit ? state.finalWeekFee : REGULAR_WEEK_FEE_DOP;
+  const activeReceived = ledger.rows[activeWeek - 1]?.income ?? 0;
+  const activeRow = ledger.rows[activeWeek - 1];
+  for (const button of document.querySelectorAll("[data-transfer-kind]")) {
+    const pool = button.dataset.transferKind === "pool";
+    const paid = pool ? activeRow?.poolPaid : activeRow?.expensePaid;
+    const amount = pool ? (paid ? activeRow.poolTransfer : activeRow?.pool ?? 0)
+      : (paid ? activeRow.expense : moneyCents(state.finance.weeklyExpense));
+    button.setAttribute("aria-pressed", String(Boolean(paid)));
+    button.title = `${weekDisplayName(activeWeek)} · ${money(amount)}`;
+    button.disabled = !activeRow || (!paid && amount <= 0);
+  }
+  const weeklyGoal = moneyCents(state.teamCount * activeFee);
+  const inscriptionReceived = ledger.inscription + ledger.reserveReceived;
+  const inscriptionGoal = moneyCents(state.teamCount * INSCRIPTION_FEE_DOP);
+  const progress = (label, received, goal, showBar = true) => {
+    const percent = goal > 0 ? Math.round(clamp(received / goal, 0, 1) * 100) : 0;
+    const bar = showBar ? `<progress max="100" value="${percent}" aria-label="${label}"></progress>` : "";
+    return `<span class="balance-progress"><span>${label}</span>${bar}<span>${money(received)} / ${money(goal)}</span></span>`;
+  };
+  const summaryMeters = document.querySelector("#paymentBalanceProgress");
+  const compactMeter = (label, received, goal) => `<span class="balance-compact-meter" title="${money(received)} / ${money(goal)}"><span class="balance-meter-line"><span>${label}</span><strong>${compactMoney(received)} / ${compactMoney(goal)}</strong></span><progress max="${goal || 1}" value="${clamp(received, 0, goal)}" aria-label="${label}" aria-valuetext="${money(received)} de ${money(goal)}"></progress></span>`;
+  if (summaryMeters) summaryMeters.innerHTML =
+    compactMeter(activeWeek === state.weekLimit ? "Pool · Final" : `Pool · S${activeWeek}`, activeReceived, weeklyGoal)
+    + compactMeter("Inscripciones", inscriptionReceived, inscriptionGoal);
   const metrics = [
-    ["Inscripciones recibidas", ledger.inscription, `${ledger.count} pagos × DOP 15,000`],
-    ["Reserva recibida para gastos", ledger.reserveReceived, `${ledger.count} pagos × DOP 3,000; incluida en la cuenta`],
-    ["Pagos semanales recibidos", weeklyReceived, "Incluye los pagos de la gran final"],
+    ["Inscripciones recibidas", inscriptionReceived, `DOP ${INSCRIPTION_FEE_DOP.toLocaleString("en-US")} por equipo, incluida la reserva`, "", progress(`Inscripciones: ${ledger.count} de ${state.teamCount}`, inscriptionReceived, inscriptionGoal)],
+    ["Reserva recibida para gastos", ledger.reserveReceived, "DOP 3,000 por equipo, ya incluidos en inscripciones"],
+    ["Pagos semanales recibidos", weeklyReceived, "Acumulado de todas las semanas", "", progress(weekDisplayName(activeWeek), activeReceived, weeklyGoal)],
     ["Aporte recibido a la final", ledger.donation, "Donaciones recibidas"],
-    ["Total recibido", ledger.receipts, "Inscripciones + reserva + pagos semanales + aporte", "subtotal"],
+    ["Total recibido", ledger.receipts, "Inscripciones + pagos semanales + aporte", "subtotal"],
     ["Transferencias realizadas", -ledger.totalTransfers, "Pool distribuido + gastos del tour"],
     ["Comisiones de salida · 0.2%", -ledger.totalFees, "Sobre cada transferencia completa; se cubren con la reserva para gastos"],
-    ["Saldo esperado en cuenta", ledger.balance, "Total recibido − transferencias − comisiones", "balance"],
+    ["Saldo esperado en cuenta", ledger.balance, "Total recibido − transferencias − comisiones", "balance", progress("Saldo del total recibido", ledger.balance, ledger.receipts, false)],
     ["Gastos del tour pagados", ledger.totalExpenses, "Ya incluidos en las transferencias; no se restan otra vez"],
     ["Reserva restante para gastos", ledger.reserve, "Reserva recibida − gastos pagados − todas las comisiones", "subtotal"],
     ["Aporte de inscripciones a la final", moneyCents(ledger.count * 10000), "DOP 10,000 por inscripción; incluido en lo recibido"],
@@ -1753,15 +1810,17 @@ function renderFinance() {
   const order = state.finance.conceptOrder;
   metrics.sort((a, b) => (order.includes(a[0]) ? order.indexOf(a[0]) : order.length) - (order.includes(b[0]) ? order.indexOf(b[0]) : order.length));
   summary.innerHTML = `<caption>Balance actual de la cuenta</caption><thead><tr><th scope="col">Concepto</th><th scope="col">Monto DOP</th><th scope="col">Detalle</th></tr></thead><tbody>`
-    + metrics.map(([label, amount, detail, style = ""]) => `<tr class="balance-${style}" data-concept="${escapeHtml(label)}"><th scope="row"><button type="button" class="concept-grip" title="Arrastrar para ordenar; flechas arriba y abajo" aria-label="Reordenar ${escapeHtml(label)}">⠿</button>${label}</th><td class="balance-amount ${amount < 0 ? "balance-outgoing" : ""}">${money(amount)}</td><td class="balance-detail">${detail}</td></tr>`).join("") + "</tbody>";
+    + metrics.map(([label, amount, detail, style = "", meter = ""]) => `<tr class="balance-${style}" data-concept="${escapeHtml(label)}"><th scope="row"><button type="button" class="concept-grip" title="Arrastrar para ordenar; flechas arriba y abajo" aria-label="Reordenar ${escapeHtml(label)}">⠿</button>${label}</th><td class="balance-amount ${amount < 0 ? "balance-outgoing" : ""}">${money(amount)}</td><td class="balance-detail">${detail}${meter}</td></tr>`).join("") + "</tbody>";
   setupConceptReorder(summary);
   const row = (label, cells, className = "") => `<tr class="${className}"><th scope="row">${label}</th>${cells.map(cell => `<td>${cell}</td>`).join("")}</tr>`;
   const amounts = key => ledger.rows.map(item => money(item[key]));
   table.innerHTML = `<caption>Movimientos semanales · saldo calculado con todas las inscripciones y aportes recibidos a la fecha</caption><thead><tr><th>Movimiento</th>${ledger.rows.map(item => `<th>${weekDisplayName(item.week)}</th>`).join("")}</tr></thead><tbody>`
     + row("Pool semanal recibido", amounts("income"))
     + row("Pool a distribuir", amounts("pool"))
-    + row("Restaurante / gasto del tour", ledger.rows.map(item => money(item.transferPaid ? item.expense : moneyCents(state.finance.weeklyExpense))))
-    + row("Transferencia realizada · pool + gasto", ledger.rows.map(item => `<label class="finance-paid"><input type="checkbox" data-finance-transfer="${item.week}" ${item.transferPaid ? "checked" : ""} aria-label="Transferencia realizada ${weekDisplayName(item.week)}" /><span>${money(item.transferPaid ? item.transfer : item.plannedTransfer)}</span></label>`))
+    + row("Restaurante / gasto del tour", ledger.rows.map(item => money(item.expensePaid ? item.expense : moneyCents(state.finance.weeklyExpense))))
+    + row("Pool transferido", amounts("poolTransfer"))
+    + row("Gasto transferido", amounts("expense"))
+    + row("Total transferido", amounts("transfer"))
     + row("Comisión de transferencias · 0.2%", amounts("transferFee"))
     + row("Saldo esperado en cuenta", ledger.rows.map(item => `<strong class="${item.balance < 0 ? "finance-negative" : ""}">${money(item.balance)}</strong>`), "finance-total")
     + row("Reserva restante (menos todas las comisiones)", ledger.rows.map(item => `<span class="${item.reserve < 0 ? "finance-negative" : ""}">${money(item.reserve)}</span>`))
@@ -1786,16 +1845,13 @@ function setupConceptReorder(table) {
     ghost.style.width = `${bounds.width}px`;
     const ghostBody = document.createElement("tbody");
     const clone = row.cloneNode(true);
-    [...clone.cells].forEach((cell, index) => {
-      cell.style.width = `${row.cells[index].getBoundingClientRect().width}px`;
-    });
     clone.querySelectorAll("button").forEach(button => button.tabIndex = -1);
     ghostBody.append(clone);
     ghost.append(ghostBody);
     document.body.append(ghost);
     ghost.style.left = `${bounds.left}px`;
     ghost.style.top = `${bounds.top}px`;
-    drag = { pointer: event.pointerId, row, original: [...body.rows], handle, ghost,
+    drag = { pointer: event.pointerId, row, handle, ghost, target: null,
       offsetX: event.clientX - bounds.left, offsetY: event.clientY - bounds.top };
     // Capture on the stationary table: moving a captured row can lose capture.
     table.setPointerCapture(event.pointerId);
@@ -1808,9 +1864,9 @@ function setupConceptReorder(table) {
       drag.ghost.style.top = `${event.clientY - drag.offsetY}px`;
       const row = drag.row;
       const target = document.elementFromPoint(event.clientX, event.clientY)?.closest("tr[data-concept]");
-      if (!target || target === row || target.parentElement !== body) return;
-      const rect = target.getBoundingClientRect();
-      body.insertBefore(row, event.clientY > rect.top + rect.height / 2 ? target.nextSibling : target);
+      drag.target?.classList.remove("concept-drop-target");
+      drag.target = target && target !== row && target.parentElement === body ? target : null;
+      drag.target?.classList.add("concept-drop-target");
   };
   const finish = (event, cancelled = false) => {
     if (!drag || drag.pointer !== event.pointerId) return;
@@ -1818,10 +1874,14 @@ function setupConceptReorder(table) {
     drag = null;
     current.ghost.remove();
     current.row.classList.remove("is-reordering");
-    if (cancelled) current.original.forEach(row => body.append(row));
+    current.target?.classList.remove("concept-drop-target");
     if (table.hasPointerCapture(event.pointerId)) table.releasePointerCapture(event.pointerId);
+    if (!cancelled && current.target) {
+      const rows = [...body.rows];
+      body.insertBefore(current.row, rows.indexOf(current.target) > rows.indexOf(current.row) ? current.target.nextSibling : current.target);
+      persist();
+    }
     current.handle.focus({ preventScroll: true });
-    if (!cancelled) persist();
   };
   table.onpointerup = event => finish(event);
   table.onpointercancel = event => finish(event, true);
@@ -1845,22 +1905,26 @@ document.querySelector("#weeklyExpenseInput")?.addEventListener("change", event 
   state.finance.weeklyExpense = moneyCents(event.target.value) / 100;
   renderFinance(); saveState(true);
 });
-document.querySelector("#financeTable")?.addEventListener("change", event => {
-  if (!requireAdmin()) return;
-  const input = event.target;
+document.querySelector("#weeklyTransferActions")?.addEventListener("click", event => {
+  const button = event.target.closest("[data-transfer-kind]");
+  if (!button || !requireAdmin()) return;
+  const week = activeWeek;
+  const row = buildPaymentLedger(state).rows[week - 1];
+  if (!row) return;
+  const pool = button.dataset.transferKind === "pool";
+  const paid = pool ? row.poolPaid : row.expensePaid;
+  const amount = pool ? row.pool : moneyCents(state.finance.weeklyExpense);
+  if (!paid && amount <= 0) return;
   state.finance = normalizeFinance(state.finance);
-  if (input.dataset.financeTransfer) {
-    const week = input.dataset.financeTransfer;
-    if (input.checked) {
-      const row = buildPaymentLedger(state).rows.find(item => item.week === Number(week));
-      if (!row) return;
-      state.finance.transfers[week] = row.plannedTransfer / 100;
-      state.finance.expenses[week] = state.finance.weeklyExpense;
-    } else {
-      delete state.finance.transfers[week];
-      delete state.finance.expenses[week];
-    }
-  } else return;
+  if (Object.hasOwn(state.finance.transfers, week)) {
+    state.finance.poolTransfers[week] = row.poolTransfer / 100;
+    state.finance.expenseTransfers[week] = row.expense / 100;
+    delete state.finance.transfers[week];
+    delete state.finance.expenses[week];
+  }
+  const transfers = pool ? state.finance.poolTransfers : state.finance.expenseTransfers;
+  if (paid) delete transfers[week];
+  else transfers[week] = amount / 100;
   renderFinance(); saveState(true);
 });
 
@@ -2675,6 +2739,7 @@ function closeActionMenus(exceptMenu = null) {
 }
 
 els.categorySelect.addEventListener("change", () => switchCategory(els.categorySelect.value));
+document.querySelector("#publicCategorySelect")?.addEventListener("change", event => switchCategory(event.target.value));
 window.addEventListener("popstate", () => {
   const routeCategory = categoryFromPath();
   if (routeCategory && routeCategory !== appState.activeCategory) {
@@ -2751,6 +2816,7 @@ document.querySelector("#adminUsernameInput")?.addEventListener("keydown", (even
 
 document.querySelector("#manageUsersButton")?.addEventListener("click", () => {
   if (!adminToken || currentUser?.username !== "piero") return;
+  document.querySelector("#tourSettings")?.close();
   document.querySelector("#managedPassword").value = "";
   document.querySelector("#usersError").hidden = true;
   document.querySelector("#usersModal").hidden = false;
@@ -2832,6 +2898,7 @@ els.doubleToggle.addEventListener("change", () => {
 
 els.clearWeekButton.addEventListener("click", () => {
   if (!requireAdmin()) return;
+  if (!confirm(`¿Limpiar los resultados de ${weekDisplayName(activeWeek)}? Se borrarán las posiciones, los scores y los desempates de esta semana. Los pagos se conservarán.`)) return;
   getWeek().placements = Array(MAX_TEAMS).fill(null);
   getWeek().scores = {};
   getWeek().holeScores = {};
@@ -2910,6 +2977,173 @@ standingsToggle?.addEventListener("click", () => {
   updateStandingsSize();
 });
 if (placementPanel) new ResizeObserver(updateStandingsSize).observe(placementPanel);
+
+const rouletteToggle = document.querySelector("#rouletteAccessToggle");
+const rouletteWarning = document.querySelector("#rouletteAccessWarning");
+const rouletteButton = document.querySelector("#openRouletteButton");
+const sectionContainer = document.querySelector("#tourSections");
+const sectionControls = document.querySelector("#sectionOrderControls");
+const sectionNames = { results: "Equipos y posiciones", payments: "Pagos", history: "Historial y reportes" };
+let layoutAccount;
+let layoutOrder = Object.keys(sectionNames);
+let layoutRevision = 0;
+let layoutSave = Promise.resolve();
+const preferenceUrl = name => API_STATE_URL.replace(/\/state$/, "/" + name);
+const preferenceHeaders = token => ({ Authorization: `Bearer ${token}`, "Content-Type": "application/json" });
+
+function renderRouletteAccess() {
+  const owner = currentUser?.username === "piero";
+  const control = document.querySelector("#rouletteAccessControl");
+  if (control) control.hidden = !owner;
+  if (rouletteToggle) rouletteToggle.checked = rouletteEnabled;
+  if (rouletteButton) rouletteButton.hidden = !currentUser || (!owner && !rouletteEnabled);
+}
+
+async function refreshRouletteAccess() {
+  if (!currentUser || !adminToken) return false;
+  const token = adminToken;
+  try {
+    const response = await fetch(preferenceUrl("auth/session"), { headers: preferenceHeaders(token), cache: "no-store" });
+    if (!response.ok || token !== adminToken) return false;
+    const user = await response.json();
+    if (token !== adminToken) return false;
+    rouletteEnabled = user.rouletteEnabled === true;
+    renderRouletteAccess();
+    return user.username === "piero" || rouletteEnabled;
+  } catch { return false; }
+}
+
+async function setRouletteAccess(enabled) {
+  if (currentUser?.username !== "piero" || !requireAdmin()) return;
+  rouletteToggle.disabled = true;
+  try {
+    const response = await fetch(preferenceUrl("roulette-access"), {
+      method: "PUT", headers: preferenceHeaders(adminToken), body: JSON.stringify(enabled),
+    });
+    if (!response.ok) throw new Error();
+    rouletteEnabled = enabled;
+  } catch { showToast("No se pudo cambiar el acceso a la ruleta.", "error"); }
+  finally { rouletteToggle.disabled = false; renderRouletteAccess(); }
+}
+
+rouletteToggle?.addEventListener("change", () => {
+  if (!rouletteToggle.checked) return void setRouletteAccess(false);
+  rouletteToggle.checked = rouletteEnabled;
+  rouletteWarning.returnValue = "";
+  rouletteWarning.showModal();
+});
+rouletteWarning?.addEventListener("close", () => {
+  if (rouletteWarning.returnValue === "enable") void setRouletteAccess(true);
+});
+
+function normalizeSectionOrder(order) {
+  const defaults = Object.keys(sectionNames);
+  return Array.isArray(order) && order.length === defaults.length && defaults.every(id => order.includes(id))
+    ? order : defaults;
+}
+
+function renderSectionOrder() {
+  if (!sectionContainer || !sectionControls) return;
+  const sections = new Map([...sectionContainer.children].map(section => [section.dataset.section, section]));
+  for (const id of layoutOrder) sectionContainer.append(sections.get(id));
+  const visible = layoutOrder.filter(id => id !== "payments" || isAdminMode());
+  sectionControls.innerHTML = visible.map(id => `<li data-layout="${id}"><button type="button" class="section-grip" aria-label="Reordenar ${sectionNames[id]}" aria-keyshortcuts="ArrowUp ArrowDown" title="Arrastrar o usar las flechas">⠿ <span>${sectionNames[id]}</span></button></li>`).join("");
+}
+
+function updateTourPreferences() {
+  if (!sectionContainer) return;
+  const account = currentUser?.username || "guest";
+  if (layoutAccount !== account) {
+    layoutAccount = account;
+    const revision = ++layoutRevision;
+    rouletteEnabled = account === window.TOUR_USER?.username && window.TOUR_USER?.rouletteEnabled === true;
+    if (account !== "guest") void refreshRouletteAccess();
+    try { layoutOrder = normalizeSectionOrder(JSON.parse(localStorage.getItem("tour-section-order:" + account))); }
+    catch { layoutOrder = Object.keys(sectionNames); }
+    if (account !== "guest") {
+      fetch(preferenceUrl("section-order"), { headers: preferenceHeaders(adminToken), cache: "no-store" })
+        .then(response => response.ok ? response.json() : null)
+        .then(order => {
+          if (!order || revision !== layoutRevision) return;
+          layoutOrder = normalizeSectionOrder(order);
+          renderSectionOrder();
+        }).catch(() => {});
+    }
+    renderSectionOrder();
+  } else if (sectionControls.dataset.mode !== String(isAdminMode())) renderSectionOrder();
+  sectionControls.dataset.mode = String(isAdminMode());
+  renderRouletteAccess();
+}
+
+function moveTourSection(id, neighbor) {
+  if (!neighbor || neighbor === id) return;
+  const visible = layoutOrder.filter(id => id !== "payments" || isAdminMode());
+  const from = visible.indexOf(id);
+  const to = visible.indexOf(neighbor);
+  if (from < 0 || to < 0) return;
+  visible.splice(from, 1);
+  visible.splice(to, 0, id);
+  layoutOrder = layoutOrder.map(item => item === "payments" && !isAdminMode() ? item : visible.shift());
+  ++layoutRevision;
+  const order = JSON.stringify(layoutOrder);
+  localStorage.setItem("tour-section-order:" + layoutAccount, order);
+  renderSectionOrder();
+  sectionControls.querySelector(`[data-layout="${id}"] button`)?.focus({ preventScroll: true });
+  if (layoutAccount === "guest") return;
+  const token = adminToken;
+  layoutSave = layoutSave.then(async () => {
+    const response = await fetch(preferenceUrl("section-order"), {
+      method: "PUT", headers: preferenceHeaders(token), body: order,
+    });
+    if (!response.ok) throw new Error();
+  }).catch(() => showToast("El orden quedó guardado solo en este navegador.", "error"));
+}
+
+let sectionDrag = null;
+sectionControls?.addEventListener("pointerdown", event => {
+  const item = event.target.closest(".section-grip")?.closest("li");
+  if (!item || !event.isPrimary || event.button !== 0 || sectionDrag) return;
+  const bounds = item.getBoundingClientRect();
+  const preview = document.createElement("div");
+  preview.className = "section-drag-preview";
+  preview.setAttribute("aria-hidden", "true");
+  preview.textContent = sectionNames[item.dataset.layout];
+  Object.assign(preview.style, { left: `${bounds.left}px`, top: `${bounds.top}px`, width: `${bounds.width}px` });
+  sectionControls.closest("dialog").append(preview);
+  sectionDrag = { item, preview, pointer: event.pointerId, offset: event.clientY - bounds.top, target: null };
+  sectionControls.setPointerCapture(event.pointerId);
+  item.classList.add("is-dragging");
+  event.preventDefault();
+});
+sectionControls?.addEventListener("pointermove", event => {
+  if (sectionDrag?.pointer !== event.pointerId) return;
+  sectionDrag.preview.style.top = `${event.clientY - sectionDrag.offset}px`;
+  sectionDrag.target?.classList.remove("is-drop-target");
+  const target = document.elementFromPoint(event.clientX, event.clientY)?.closest("li[data-layout]");
+  sectionDrag.target = target?.parentElement === sectionControls && target !== sectionDrag.item ? target : null;
+  sectionDrag.target?.classList.add("is-drop-target");
+});
+function finishSectionDrag(event, commit = false) {
+  if (sectionDrag?.pointer !== event.pointerId) return;
+  const { item, target, preview, pointer } = sectionDrag;
+  sectionDrag = null;
+  preview.remove();
+  item.classList.remove("is-dragging");
+  target?.classList.remove("is-drop-target");
+  if (sectionControls.hasPointerCapture(pointer)) sectionControls.releasePointerCapture(pointer);
+  if (commit && target) moveTourSection(item.dataset.layout, target.dataset.layout);
+}
+sectionControls?.addEventListener("pointerup", event => finishSectionDrag(event, true));
+sectionControls?.addEventListener("pointercancel", finishSectionDrag);
+sectionControls?.addEventListener("lostpointercapture", finishSectionDrag);
+sectionControls?.addEventListener("keydown", event => {
+  const item = event.target.closest(".section-grip")?.closest("li");
+  if (!item || !["ArrowUp", "ArrowDown"].includes(event.key)) return;
+  event.preventDefault();
+  const target = event.key === "ArrowUp" ? item.previousElementSibling : item.nextElementSibling;
+  moveTourSection(item.dataset.layout, target?.dataset.layout);
+});
+if (rouletteButton) window.setInterval(() => { if (currentUser) void refreshRouletteAccess(); }, 15000);
 render();
 updateStandingsSize();
 window.setInterval(pollForRemoteUpdates, SYNC_POLL_INTERVAL_MS);
