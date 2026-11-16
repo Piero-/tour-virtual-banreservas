@@ -10,6 +10,7 @@ const API_AUTH_URL = `${API_BASE_URL}/api/auth/login`;
 export default function App() {
   const roulettePage = /\/ruleta\/?$/.test(location.pathname);
   const [ready, setReady] = useState(false);
+  const [mobileCameraSlot, setMobileCameraSlot] = useState(null);
   const booted = useRef(false);
 
   useEffect(() => {
@@ -184,12 +185,15 @@ export default function App() {
         <div id="tourSections">
         <section className="workspace-grid" data-section="results">
           <aside className="panel roster-panel admin-only">
-            <div className="panel-heading">
+            <div className="panel-heading roster-heading">
               <div>
                 <p className="eyebrow">Equipos</p>
                 <h2>Grupo para arrastrar</h2>
               </div>
-              <button id="toggleNamesButton" className="button secondary" type="button">Ocultar equipos</button>
+              <div className="roster-heading-actions">
+                <span className="roster-camera-slot" ref={setMobileCameraSlot}></span>
+                <button id="toggleNamesButton" className="button secondary" type="button">Ocultar equipos</button>
+              </div>
             </div>
             <div id="teamEditorWrap" className="team-editor-wrap">
               <div className="editor-actions">
@@ -215,7 +219,7 @@ export default function App() {
                 <p id="prizeSubtitle" className="prize-subtitle"></p>
               </div>
               <div className="placement-actions admin-only">
-                <ScorecardImport />
+                <ScorecardImport mobileCameraSlot={mobileCameraSlot} />
                 <button id="clearWeekButton" className="button secondary" type="button">Limpiar semana</button>
               </div>
             </div>

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { matchScorecardTeam, readScorecard, readSimulatorCard } from "./scorecard-ocr";
 import { readScrambleAtlas, recognizeSimulatorDigits, recognizeSimulatorNames, simulatorAtlas, simulatorGrid } from "./simulator-ocr";
 
@@ -45,7 +46,7 @@ function extractRows(data) {
   return rows.sort((a, b) => a.y - b.y).map(row => row.words.sort((a, b) => a.bbox.x0 - b.bbox.x0).map(word => word.text).join(" ")).join("\n");
 }
 
-export default function ScorecardImport() {
+export default function ScorecardImport({ mobileCameraSlot }) {
   const dialog = useRef(null);
   const input = useRef(null);
   const running = useRef(false);
@@ -206,8 +207,8 @@ export default function ScorecardImport() {
     } catch (error) { setError(error.message); }
   }
 
-  return <>
-    <button type="button" className="button secondary admin-only scorecard-open" aria-label="Importar fotos" title="Importar fotos" onClick={open}>
+  const cameraButton = variant => (
+    <button type="button" className={`button secondary admin-only scorecard-open ${variant}`} aria-label="Importar fotos" title="Importar fotos" aria-haspopup="dialog" onClick={open}>
       <span className="scorecard-camera" aria-hidden="true">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z" />
@@ -215,6 +216,10 @@ export default function ScorecardImport() {
         </svg>
       </span>
     </button>
+  );
+  return <>
+    {cameraButton("scorecard-open-desktop")}
+    {mobileCameraSlot && createPortal(cameraButton("scorecard-open-mobile"), mobileCameraSlot)}
     <dialog ref={dialog} className="hole-score-modal scorecard-import" aria-labelledby="scorecardTitle" onPaste={pasteImages}>
       <div className="scorecard-heading">
         <div><p className="eyebrow">{context?.label}</p><h2 id="scorecardTitle">Importar tarjetas de score</h2></div>
