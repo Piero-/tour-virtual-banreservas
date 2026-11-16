@@ -59,6 +59,7 @@ export default function ScorecardImport({ mobileCameraSlot }) {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [over, setOver] = useState(false);
+  const [readingClipboard, setReadingClipboard] = useState(false);
   const [toast, setToast] = useState("");
   const toastTimer = useRef(null);
   useEffect(() => () => clearTimeout(toastTimer.current), []);
@@ -186,6 +187,29 @@ export default function ScorecardImport({ mobileCameraSlot }) {
     event.preventDefault();
     void readFiles(images);
   }
+  async function pasteFromClipboard() {
+    if (readingClipboard) return;
+    if (!navigator.clipboard?.read) {
+      setError("No se puede acceder al portapapeles aquí. Abre el sitio por HTTPS o selecciona las fotos.");
+      return;
+    }
+    setReadingClipboard(true);
+    try {
+      const items = await navigator.clipboard.read();
+      const images = [];
+      for (const item of items) {
+        const type = item.types.find(value => acceptedMime.test(value));
+        if (!type) continue;
+        const blob = await item.getType(type);
+        images.push(new File([blob], `Foto pegada.${type === "image/jpeg" ? "jpg" : type.endsWith("bmp") ? "bmp" : type.split("/")[1]}`, { type }));
+      }
+      if (!dialog.current?.open || dialog.current.dataset.draftKey !== draftKey) return;
+      if (images.length) void readFiles(images);
+      else setError("No encontré imágenes en el portapapeles. Copia una foto y vuelve a pegarla.");
+    } catch {
+      if (dialog.current?.open) setError("No se pudo pegar la imagen. Confirma el permiso de pegar o usa Seleccionar fotos.");
+    } finally { setReadingClipboard(false); }
+  }
   const update = (id, patch) => setEntries(items => items.map(item => item.id === id ? { ...item, ...patch } : item));
   const complete = entry => entry.teamId && /^(?:E|[+-]?\d{1,2})$/i.test(entry.score.trim()) && holes.every(hole => Number.isInteger(entry.holes[hole]));
   const duplicates = new Set(entries.filter((entry, i) => entry.teamId && entries.some((other, j) => i !== j && other.teamId === entry.teamId)).map(entry => entry.teamId));
@@ -220,10 +244,16 @@ export default function ScorecardImport({ mobileCameraSlot }) {
   return <>
     {cameraButton("scorecard-open-desktop")}
     {mobileCameraSlot && createPortal(cameraButton("scorecard-open-mobile"), mobileCameraSlot)}
-    <dialog ref={dialog} className="hole-score-modal scorecard-import" aria-labelledby="scorecardTitle" onPaste={pasteImages}>
+    <dialog ref={dialog} className="hole-score-modal scorecard-import" aria-labelledby="scorecardTitle" data-draft-key={draftKey} onPaste={pasteImages}>
+      <div className="scorecard-import-top">
       <div className="scorecard-heading">
         <div><p className="eyebrow">{context?.label}</p><h2 id="scorecardTitle">Importar tarjetas de score</h2></div>
         <button type="button" className="icon-button" aria-label="Cerrar" onClick={() => dialog.current.close()}>×</button>
+      </div>
+      <div className="scorecard-mobile-paste">
+        <button type="button" className="button primary" disabled={readingClipboard} onClick={() => void pasteFromClipboard()}>Pegar fotos</button>
+        <span>{entries.length} {entries.length === 1 ? "resultado" : "resultados"}</span>
+      </div>
       </div>
       <input ref={input} type="file" accept="image/jpeg,image/png,image/webp,image/bmp" multiple hidden onChange={event => { void readFiles(event.target.files); event.target.value = ""; }} />
       <button type="button" className={`scorecard-drop ${over ? "is-over" : ""}`}

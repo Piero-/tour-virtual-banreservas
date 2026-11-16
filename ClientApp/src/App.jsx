@@ -11,7 +11,19 @@ export default function App() {
   const roulettePage = /\/ruleta\/?$/.test(location.pathname);
   const [ready, setReady] = useState(false);
   const [mobileCameraSlot, setMobileCameraSlot] = useState(null);
+  const [paymentsCollapsed, setPaymentsCollapsed] = useState(() => {
+    try { return localStorage.getItem("tour-payments-collapsed") === "true"; }
+    catch { return false; }
+  });
+  const paymentBalance = useRef(null);
   const booted = useRef(false);
+
+  function setPaymentsCompact(collapsed) {
+    if (collapsed && paymentBalance.current) paymentBalance.current.open = false;
+    setPaymentsCollapsed(collapsed);
+    try { localStorage.setItem("tour-payments-collapsed", String(collapsed)); }
+    catch { /* The preference still applies in this tab. */ }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -244,21 +256,26 @@ export default function App() {
               <p className="eyebrow">Pagos</p>
               <h2>Pagos por equipo</h2>
             </div>
-            <button id="showWeeksButton" className="button secondary admin-only" type="button">Mostrar semanas</button>
+            <div className="payments-heading-actions">
+              <button id="showWeeksButton" className="button secondary admin-only" type="button" hidden={paymentsCollapsed}>Mostrar semanas</button>
+              <button className="button secondary payments-collapse-button" type="button" aria-controls="paymentsContent" aria-expanded={!paymentsCollapsed}
+                onClick={() => setPaymentsCompact(!paymentsCollapsed)}>{paymentsCollapsed ? "Expandir pagos" : "Colapsar pagos"}</button>
+            </div>
           </div>
           <div className="payment-balance-header">
-          <details className="payment-balance-wrap">
-            <summary>
+          <details className="payment-balance-wrap" ref={paymentBalance}>
+            <summary onClick={() => { if (paymentsCollapsed) setPaymentsCompact(false); }}>
               <span className="balance-summary-heading"><span>Balance de la cuenta</span><strong id="paymentBalanceTotal"></strong></span>
               <span id="paymentBalanceProgress" className="balance-summary-meters"></span>
             </summary>
             <table id="paymentSummary" className="payment-balance-table" aria-live="polite"></table>
           </details>
-          <div id="weeklyTransferActions" className="weekly-transfer-actions" role="group" aria-label="Transferencias de la semana activa">
+          <div id="weeklyTransferActions" className="weekly-transfer-actions" role="group" aria-label="Transferencias de la semana activa" hidden={paymentsCollapsed}>
             <button type="button" className="button secondary" data-transfer-kind="pool" aria-pressed="false">Pool transferido</button>
             <button type="button" className="button secondary" data-transfer-kind="expense" aria-pressed="false">Gasto transferido</button>
           </div>
           </div>
+          <div id="paymentsContent" hidden={paymentsCollapsed}>
           <div className="table-scroll payment-scroll">
             <table id="paymentTable" className="payment-table"></table>
           </div>
@@ -280,6 +297,7 @@ export default function App() {
             <summary>Auditoría de pagos</summary>
             <div id="paymentAuditEntries" aria-live="polite"></div>
           </details>
+          </div>
         </section>
 
         <div data-section="history">

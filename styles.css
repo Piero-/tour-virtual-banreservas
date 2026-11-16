@@ -3169,6 +3169,15 @@ body {
 .scorecard-drop { display: grid; place-items: center; gap: 5px; width: 100%; min-height: 110px; padding: 12px; border: 1px dashed #79bf9f; border-radius: 8px; background: #142f25; color: #f3ebd4; font: inherit; cursor: pointer; }
 .scorecard-drop > span { font-size: 20px; }
 .scorecard-drop > small { color: #b8c9be; }
+.scorecard-mobile-paste { display: none; }
+@media (max-width: 680px) {
+  .scorecard-import-top { position: sticky; top: -16px; z-index: 2; margin: -16px -16px 9px; padding: 12px 16px 8px; border-bottom: 1px solid #385246; background: #10231b; }
+  .scorecard-import-top h2 { margin-bottom: 6px; }
+  .scorecard-mobile-paste { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: #b8c9be; font-size: 12px; }
+  .scorecard-mobile-paste .button { min-height: 42px; }
+  .scorecard-import .scorecard-drop { min-height: 44px; padding: 6px 10px; font-size: 13px; }
+  .scorecard-import .scorecard-drop > :is(span, small) { display: none; }
+}
 .scorecard-reading { display: grid; gap: 6px; margin: 12px 0; color: #c9d5cb; font-size: 12px; }
 .scorecard-reading progress { width: 100%; height: 8px; accent-color: #79bf9f; }
 .scorecard-drop:is(:hover, .is-over):not(:disabled) { background: #1c4535; }
@@ -3413,6 +3422,10 @@ div.hole-score-summary { cursor: default; }
 .finance-amount-input input::-webkit-inner-spin-button,
 .finance-amount-input input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .payment-balance-wrap { margin: 0 0 16px; border-block: 1px solid #385246; }
+.payments-heading-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.payments-panel .payments-heading-actions .button { width: auto; min-height: 40px; padding: 7px 10px; font-size: 12px; }
+.payments-heading-actions [hidden], #weeklyTransferActions[hidden], #paymentsContent[hidden] { display: none; }
+.payment-balance-header:has(#weeklyTransferActions[hidden]) .payment-balance-wrap { margin-bottom: 0; }
 .weekly-transfer-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-bottom: 16px; }
 .weekly-transfer-actions .button { min-height: 40px; padding: 6px 10px; font-size: 12px; }
 .weekly-transfer-actions .button[aria-pressed="true"] { background: #006747; color: #fff8e5; border-color: #8bceab; }
@@ -3421,6 +3434,7 @@ div.hole-score-summary { cursor: default; }
   .payment-balance-header { display: grid; }
   .payment-balance-header > * { grid-area: 1 / 1; min-width: 0; }
   .payment-balance-header > details > summary { padding-inline-end: 285px; min-height: 40px; }
+  .payment-balance-header:has(#weeklyTransferActions[hidden]) > details > summary { padding-inline-end: 2px; min-height: 0; }
   .payment-balance-header .weekly-transfer-actions { align-self: start; justify-self: end; z-index: 1; margin: 10px 0 0; }
 }
 .concept-grip { display: inline-grid; place-items: center; width: 28px; height: 32px; padding: 0; margin-right: 6px; vertical-align: middle; background: transparent; border: 0; color: #b8c9be; font-size: 20px; cursor: grab; touch-action: none; }
