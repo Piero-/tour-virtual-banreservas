@@ -251,9 +251,13 @@ export default function ScorecardImport({ mobileCameraSlot }) {
         <button type="button" className="icon-button" aria-label="Cerrar" onClick={() => dialog.current.close()}>×</button>
       </div>
       <div className="scorecard-mobile-paste">
-        <button type="button" className="button primary" disabled={readingClipboard} onClick={() => void pasteFromClipboard()}>Pegar fotos</button>
-        <span>{entries.length} {entries.length === 1 ? "resultado" : "resultados"}</span>
+        <button type="button" className="button primary" disabled={readingClipboard} onClick={() => void pasteFromClipboard()}>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="8" y="2" width="8" height="4" rx="1" /><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /></svg>
+          Pegar fotos
+        </button>
+        <button type="button" className="button secondary" onClick={() => input.current.click()}>Galería</button>
       </div>
+      {entries.length > 0 && <p className="scorecard-mobile-count">{entries.length} {entries.length === 1 ? "resultado" : "resultados"}{readyEntries.length > 0 && ` · ${readyEntries.length} ${readyEntries.length === 1 ? "listo" : "listos"}`}</p>}
       </div>
       <input ref={input} type="file" accept="image/jpeg,image/png,image/webp,image/bmp" multiple hidden onChange={event => { void readFiles(event.target.files); event.target.value = ""; }} />
       <button type="button" className={`scorecard-drop ${over ? "is-over" : ""}`}
@@ -309,7 +313,7 @@ export default function ScorecardImport({ mobileCameraSlot }) {
         </div>}
       </section>;
       })}
-      <div className="modal-actions">{toast && <div className="scorecard-toast" role="status">{toast}</div>}<button type="button" className="button secondary" onClick={() => dialog.current.close()}>Cerrar</button><button type="button" className="button primary" disabled={!readyEntries.length} onClick={() => apply(readyEntries, true)}>Aplicar listos{readyEntries.length ? ` (${readyEntries.length})` : ""}</button></div>
+      <div className={`modal-actions${readyEntries.length ? " has-ready" : ""}${toast ? " has-toast" : ""}`}>{toast && <div className="scorecard-toast" role="status">{toast}</div>}<button type="button" className="button secondary scorecard-footer-close" onClick={() => dialog.current.close()}>Cerrar</button><button type="button" className="button primary scorecard-apply-ready" disabled={!readyEntries.length} onClick={() => apply(readyEntries, true)}>Aplicar listos{readyEntries.length ? ` (${readyEntries.length})` : ""}</button></div>
     </dialog>
   </>;
 }
