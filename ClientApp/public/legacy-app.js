@@ -2896,6 +2896,51 @@ els.doubleToggle.addEventListener("change", () => {
   renderReport();
 });
 
+window.getScorecardImportContext = () => {
+  if (!requireAdmin()) return null;
+  const week = getWeek();
+  return { category: appState.activeCategory, week: activeWeek, label: weekDisplayName(activeWeek),
+    draftKey: `tour-scorecard-draft:${currentUser?.username || "admin"}:${appState.activeCategory}:${activeWeek}`,
+    teams: structuredClone(getActiveTeams()), existing: Object.keys(week.scores || {}) };
+};
+
+window.notifyScorecardImportBusy = () => showToast("La importación de la otra semana todavía está en curso.", "error");
+
+window.applyScorecardImport = (context, entries, ignored = 0) => {
+  if (!requireAdmin()) throw new Error("Inicia sesión como administrador.");
+  if (context.category !== appState.activeCategory || context.week !== activeWeek) {
+    throw new Error("Cambió la semana o categoría activa. Vuelve a abrir la importación.");
+  }
+  const teamIds = new Set(getActiveTeams().map(team => team.id));
+  const ids = new Set();
+  const results = entries.map(entry => {
+    const score = normalizeGolfScore(entry.score);
+    const holes = [16, 17, 18].map(hole => entry.holes?.[hole]);
+    if (!teamIds.has(entry.teamId) || ids.has(entry.teamId) || !score ||
+        holes.some(delta => !HOLE_OPTIONS.some(option => option.value === delta))) {
+      throw new Error("Revisa que cada tarjeta tenga un equipo único, un score y tres hoyos válidos.");
+    }
+    ids.add(entry.teamId);
+    return { teamId: entry.teamId, score, holes: { 16: holes[0], 17: holes[1], 18: holes[2] } };
+  });
+  const week = getWeek();
+  for (const result of results) {
+    (week.scores ||= {})[result.teamId] = result.score;
+    (week.holeScores ||= {})[result.teamId] = result.holes;
+    if (week.scoreTiebreaks) delete week.scoreTiebreaks[result.teamId];
+  }
+  pruneScoreTiebreaks(week);
+  syncPlacementsFromScores(week);
+  renderPool();
+  renderPlacements();
+  renderStandings();
+  renderReport();
+  saveState(true);
+  const message = `${results.length} ${results.length === 1 ? "equipo subido" : "equipos subidos"} · ${ignored} ${ignored === 1 ? "score ignorado" : "scores ignorados"}`;
+  showToast(message);
+  return message;
+};
+
 els.clearWeekButton.addEventListener("click", () => {
   if (!requireAdmin()) return;
   if (!confirm(`¿Limpiar los resultados de ${weekDisplayName(activeWeek)}? Se borrarán las posiciones, los scores y los desempates de esta semana. Los pagos se conservarán.`)) return;

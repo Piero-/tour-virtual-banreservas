@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import Roulette from "./Roulette";
+import ScorecardImport from "./ScorecardImport";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 const API_STATE_URL = `${API_BASE_URL}/api/state`;
@@ -56,7 +57,7 @@ export default function App() {
       const { downloadSeasonPdf } = await import("./season-pdf");
       return downloadSeasonPdf(archive);
     };
-    script.src = "/legacy-app.js?v=20261115-week-confirmation";
+    script.src = "/legacy-app.js?v=20261115-scorecard-paste";
     script.async = false;
     document.body.appendChild(script);
   }, [ready]);
@@ -213,7 +214,10 @@ export default function App() {
                 <h2 id="placementTitle">Resultados semana 1</h2>
                 <p id="prizeSubtitle" className="prize-subtitle"></p>
               </div>
-              <button id="clearWeekButton" className="button secondary admin-only" type="button">Limpiar semana</button>
+              <div className="placement-actions admin-only">
+                <ScorecardImport />
+                <button id="clearWeekButton" className="button secondary" type="button">Limpiar semana</button>
+              </div>
             </div>
             <div id="placementGrid" className="placement-grid"></div>
           </section>

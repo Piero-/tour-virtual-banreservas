@@ -3147,6 +3147,56 @@ body {
 #clearWeekButton, #toggleNamesButton { width: fit-content; min-width: 0; min-height: 40px; padding: 7px 10px; font-size: 12px; line-height: 1.2; }
 #clearWeekButton { background: #562727; border-color: #9d4b4b; color: #fff0eb; }
 #clearWeekButton:hover { background: #703232; }
+.placement-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.placement-actions .scorecard-open { display: inline-grid; place-items: center; position: relative; isolation: isolate; overflow: hidden; width: 44px; height: 44px; min-height: 44px; padding: 0; border: 1px solid #5f9279; border-radius: 8px; box-shadow: 0 0 7px #79bf9f38; }
+.placement-actions .scorecard-open::before { content: ""; position: absolute; z-index: -2; inset: -50%; background: conic-gradient(from 0deg, transparent 64%, #79bf9f77 83%, #dcffe8 95%, transparent); animation: scorecard-camera-glow 3s linear infinite; }
+.placement-actions .scorecard-open::after { content: ""; position: absolute; z-index: -1; inset: 2px; border-radius: 5px; background: #142f25; }
+.placement-actions .scorecard-open:hover::after { background: #1c4535; }
+.scorecard-camera { display: inline-grid; place-items: center; color: #d4f0df; }
+.scorecard-camera svg { width: 19px; height: 19px; }
+@keyframes scorecard-camera-glow { to { transform: rotate(1turn); } }
+@media (prefers-reduced-motion: reduce) { .placement-actions .scorecard-open::before { animation: none; } }
+.scorecard-import.hole-score-modal { width: min(720px, calc(100vw - 20px)); max-height: calc(100dvh - 20px); margin: auto; padding: 16px; overflow-x: hidden; }
+.scorecard-heading, .scorecard-entry-title { display: flex; align-items: start; justify-content: space-between; gap: 10px; overflow-wrap: anywhere; }
+.scorecard-import .icon-button { min-width: 40px; min-height: 40px; font-size: 20px; }
+.scorecard-drop { display: grid; place-items: center; gap: 5px; width: 100%; min-height: 110px; padding: 12px; border: 1px dashed #79bf9f; border-radius: 8px; background: #142f25; color: #f3ebd4; font: inherit; cursor: pointer; }
+.scorecard-drop > span { font-size: 20px; }
+.scorecard-drop > small { color: #b8c9be; }
+.scorecard-reading { display: grid; gap: 6px; margin: 12px 0; color: #c9d5cb; font-size: 12px; }
+.scorecard-reading progress { width: 100%; height: 8px; accent-color: #79bf9f; }
+.scorecard-drop:is(:hover, .is-over):not(:disabled) { background: #1c4535; }
+.scorecard-result { padding: 14px 0; border-bottom: 1px solid #385246; }
+.scorecard-result.is-confirmed { margin-top: 10px; padding: 9px 10px; border: 1px solid #436452; border-radius: 8px; background: #142f25; }
+.scorecard-result.is-confirmed .scorecard-entry-title { align-items: center; flex-wrap: wrap; gap: 5px 8px; }
+.scorecard-result.is-confirmed h3 { margin: 0; color: #f3ebd4; font-size: 19px; line-height: 1.15; text-transform: uppercase; overflow-wrap: anywhere; }
+.scorecard-result.is-confirmed { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 12px; }
+.scorecard-result.is-confirmed > :not(.scorecard-total) { grid-column: 2; }
+.scorecard-total { grid-column: 1; grid-row: 1 / span 3; align-self: center; min-width: 42px; padding-inline-end: 10px; border-inline-end: 1px solid #436452; color: #9ed8b5; font-size: 32px; line-height: 1; font-variant-numeric: tabular-nums; }
+.scorecard-result.is-confirmed .scorecard-entry-actions { margin-inline-start: auto; }
+.scorecard-import .scorecard-upload-compact { min-height: 36px; padding: 5px 8px; font-size: 11px; }
+.scorecard-entry-title small { color: #b8c9be; font-size: 11px; }
+.scorecard-entry-actions, .scorecard-result-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.scorecard-entry-actions { flex: 0 0 auto; }
+.scorecard-entry-actions .icon-button { display: inline-grid; place-items: center; }
+.scorecard-import .scorecard-entry-actions .icon-button { min-width: 36px; min-height: 36px; }
+.scorecard-toast { position: absolute; inset: auto 0 calc(100% + 4px) auto; max-width: 100%; padding: 9px 12px; border: 1px solid #6ab792; border-radius: 6px; background: #164c38; color: #f3ebd4; font-size: 13px; box-shadow: 0 4px 12px #0005; }
+.scorecard-result-actions { margin-top: 10px; }
+.scorecard-preview-values { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 5px 0 0; }
+.scorecard-preview-values > div { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; min-width: 0; }
+.scorecard-preview-values dt { color: #b8c9be; font-size: 11px; }
+.scorecard-preview-values dd { margin: 0; font-size: 11px; font-weight: 700; overflow-wrap: anywhere; }
+.scorecard-result p { margin: 5px 0 9px; font-size: 12px; }
+.scorecard-error { color: #ffbdac; }
+.scorecard-values, .scorecard-holes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 90px); gap: 8px; margin: 8px 0; }
+.scorecard-holes { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.scorecard-import .field { min-width: 0; font-size: 12px; }
+.scorecard-import .field :is(input, select) { box-sizing: border-box; min-width: 0; width: 100%; min-height: 44px; padding: 7px; font-size: 16px; }
+.scorecard-result pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
+.scorecard-import .modal-actions { position: sticky; bottom: -16px; padding: 10px 0; background: #10231b; }
+@media (min-width: 681px) {
+  .scorecard-import.hole-score-modal { padding: 24px; }
+  .scorecard-import .modal-actions { bottom: -24px; }
+}
 .score-carousel { touch-action: pan-y; user-select: none; -webkit-user-select: none; cursor: grab; }
 .score-carousel > div { cursor: grab; }
 .score-carousel.is-dragging { scroll-snap-type: none; scroll-behavior: auto; }

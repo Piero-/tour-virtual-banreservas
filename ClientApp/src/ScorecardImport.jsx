@@ -1,0 +1,280 @@
+import { useEffect, useRef, useState } from "react";
+import { matchScorecardTeam, readScorecard, readSimulatorCard } from "./scorecard-ocr";
+import { readScrambleAtlas, recognizeSimulatorDigits, recognizeSimulatorNames, simulatorAtlas, simulatorGrid } from "./simulator-ocr";
+
+const holeOptions = [[2, "D. Bogey (+2)"], [1, "Bogey (+1)"], [0, "Par (E)"], [-1, "Birdie (-1)"], [-2, "Eagle (-2)"], [-3, "Albatross (-3)"]];
+const holes = [18, 17, 16];
+const accepted = /\.(jpe?g|png|webp|bmp)$/i;
+const acceptedMime = /^image\/(jpeg|png|webp|bmp|x-ms-bmp)$/i;
+
+const readWords = data => (data.blocks || []).flatMap(block => block.paragraphs.flatMap(paragraph => paragraph.lines.flatMap(line => line.words)));
+
+async function readScramblePhoto(worker, file, grid, onProgress) {
+  const bitmap = await createImageBitmap(file);
+  try {
+    const source = document.createElement("canvas");
+    source.width = bitmap.width;
+    source.height = bitmap.height;
+    const context = source.getContext("2d", { willReadFrequently: true });
+    context.drawImage(bitmap, 0, 0);
+    const atlas = simulatorAtlas(context.getImageData(0, 0, source.width, source.height), grid);
+    const glyph = document.createElement("canvas");
+    const encode = ({ width, height, data }) => {
+      glyph.width = width;
+      glyph.height = height;
+      glyph.getContext("2d").putImageData(new ImageData(data, width, height), 0, 0);
+      return glyph.toDataURL("image/png");
+    };
+    const digits = await recognizeSimulatorDigits(worker, encode, atlas, onProgress);
+    const names = await recognizeSimulatorNames(worker, file, grid);
+    return readScrambleAtlas(digits, names);
+  } finally { bitmap.close(); }
+}
+
+function extractRows(data) {
+  const words = readWords(data);
+  if (!words.length) return data.text;
+  const rows = [];
+  const median = words.map(word => word.bbox.y1 - word.bbox.y0).sort((a, b) => a - b)[Math.floor(words.length / 2)];
+  for (const word of words.sort((a, b) => a.bbox.y0 - b.bbox.y0)) {
+    const y = (word.bbox.y0 + word.bbox.y1) / 2;
+    const row = rows.find(row => Math.abs(row.y - y) <= Math.max(3, median * .45));
+    if (row) row.words.push(word);
+    else rows.push({ y, words: [word] });
+  }
+  return rows.sort((a, b) => a.y - b.y).map(row => row.words.sort((a, b) => a.bbox.x0 - b.bbox.x0).map(word => word.text).join(" ")).join("\n");
+}
+
+export default function ScorecardImport() {
+  const dialog = useRef(null);
+  const input = useRef(null);
+  const running = useRef(false);
+  const pending = useRef([]);
+  const nextId = useRef(0);
+  const [context, setContext] = useState(null);
+  const [entries, setEntries] = useState([]);
+  const [status, setStatus] = useState("");
+  const [progress, setProgress] = useState(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [over, setOver] = useState(false);
+  const [toast, setToast] = useState("");
+  const toastTimer = useRef(null);
+  useEffect(() => () => clearTimeout(toastTimer.current), []);
+  const draftKey = context?.draftKey;
+  useEffect(() => {
+    if (!draftKey) return;
+    try {
+      if (entries.length) localStorage.setItem(draftKey, JSON.stringify(entries));
+      else localStorage.removeItem(draftKey);
+    } catch { /* The current tab still keeps the draft. */ }
+  }, [draftKey, entries]);
+  function open() {
+    const next = window.getScorecardImportContext?.();
+    if (!next) return;
+    if (running.current && next.draftKey !== draftKey) {
+      window.notifyScorecardImportBusy?.();
+      return;
+    }
+    if (next.draftKey !== draftKey) {
+      let restored = [];
+      try {
+        const saved = JSON.parse(localStorage.getItem(next.draftKey));
+        if (Array.isArray(saved)) restored = saved;
+      } catch { /* Start this week with an empty draft. */ }
+      const ids = new Set(next.teams.map(team => team.id));
+      setEntries(restored.map(entry => ({ ...entry, teamId: ids.has(entry.teamId) ? entry.teamId : "" })));
+      nextId.current = Math.max(nextId.current, ...restored.map(entry => Number(entry.id) || 0));
+      setError("");
+    }
+    setContext(next);
+    setToast("");
+    dialog.current.showModal();
+  }
+  async function readFiles(collection) {
+    if (!context) return;
+    const selected = Array.from(collection);
+    const files = selected.filter(file => (accepted.test(file.name) || acceptedMime.test(file.type)) && file.size <= 25 * 1024 * 1024)
+      .slice(0, Math.max(0, 20 - pending.current.length));
+    setError(files.length !== selected.length ? "Hasta 20 fotos JPG, PNG, WebP o BMP, de 25 MB como máximo por foto." : "");
+    if (!files.length) return;
+    pending.current.push(...files);
+    if (running.current) return;
+    running.current = true;
+    setBusy(true);
+    setProgress(null);
+    setStatus("Preparando lector OCR…");
+    let worker;
+    try {
+      const { createWorker } = await import("tesseract.js");
+      worker = await createWorker("eng");
+      await worker.setParameters({ preserve_interword_spaces: "1" });
+      let index = 0;
+      while (pending.current.length) {
+        const file = pending.current.shift();
+        setStatus(`Leyendo foto ${index + 1}…`);
+        setProgress(0);
+        const id = ++nextId.current;
+        try {
+          const ocrOptions = { blocks: true, text: true };
+          const { data } = await worker.recognize(file, { tessedit_pageseg_mode: "11", tessedit_char_whitelist: "" }, ocrOptions);
+          setProgress(20);
+          const raw = extractRows(data);
+          const dense = (await worker.recognize(file, { tessedit_pageseg_mode: "6" }, ocrOptions)).data;
+          setProgress(40);
+          const sparseWords = readWords(data), denseWords = readWords(dense);
+          const grid = simulatorGrid(denseWords) || simulatorGrid(sparseWords);
+          let simulator = readSimulatorCard(denseWords);
+          if (!simulator.length) simulator = readSimulatorCard(sparseWords);
+          if (grid) {
+            setStatus(`Verificando los hoyos de la foto ${index + 1}…`);
+            const scramble = await readScramblePhoto(worker, file, grid, fraction => setProgress(40 + Math.floor(fraction * 54)));
+            if (scramble.length && (scramble.some(card => card.score) || !simulator.length)) simulator = scramble;
+          }
+          if (simulator.length) {
+            const results = simulator.map((result, groupIndex) => {
+              const match = matchScorecardTeam(result.names, context.teams);
+              return { id: ++nextId.current, file: `${file.name} · Grupo ${groupIndex + 1}`, raw, result, match,
+                teamId: match?.team.id || "", score: result.score, holes: result.holes };
+            });
+            setEntries(items => [...items, ...results]);
+            continue;
+          }
+          if (grid || /\bSCORE\s*CARD\b/i.test(`${data.text}\n${dense.text}`)) {
+            setEntries(items => [...items, { id, file: file.name, raw: dense.text, teamId: "", score: "", holes: {},
+              result: { issue: "Se detectó una tarjeta del simulador, pero no se pudieron verificar los golpes. Revisa la foto o completa los campos manualmente." } }]);
+            continue;
+          }
+          const spatial = readScorecard(raw);
+          const plain = readScorecard(data.text || "");
+          let result = !spatial.issue ? spatial : plain.score ? plain : spatial;
+          let match = matchScorecardTeam([...spatial.names, ...plain.names], context.teams);
+          let recognized = raw;
+          if (result.issue || !match) {
+            const alternate = readScorecard(dense.text || "");
+            match = matchScorecardTeam([...spatial.names, ...plain.names, ...alternate.names], context.teams);
+            if (!alternate.issue || (!result.score && alternate.score)) {
+              result = alternate;
+              recognized = dense.text;
+            }
+          }
+          setEntries(items => [...items, { id, file: file.name, raw: recognized, result, match, teamId: match?.team.id || "", score: result.score, holes: result.holes }]);
+        } catch {
+          setEntries(items => [...items, { id, file: file.name, result: { issue: "No se pudo leer esta foto." }, raw: "", teamId: "", score: "", holes: {} }]);
+        } finally {
+          setProgress(100);
+          index++;
+        }
+      }
+    } catch {
+      pending.current.length = 0;
+      setError("No se pudo iniciar el lector OCR. Revisa la conexión e inténtalo de nuevo.");
+    } finally {
+      setBusy(false);
+      running.current = false;
+      setStatus("");
+      setProgress(null);
+      try { await worker?.terminate(); } catch { /* The worker may already be closed. */ }
+    }
+  }
+  function pasteImages(event) {
+    const files = [...(event.clipboardData?.items || [])].filter(item => item.kind === "file" && item.type.startsWith("image/"))
+      .map(item => item.getAsFile()).filter(Boolean);
+    const images = files.length ? files : [...(event.clipboardData?.files || [])].filter(file => file.type.startsWith("image/"));
+    if (!images.length) return;
+    event.preventDefault();
+    void readFiles(images);
+  }
+  const update = (id, patch) => setEntries(items => items.map(item => item.id === id ? { ...item, ...patch } : item));
+  const complete = entry => entry.teamId && /^(?:E|[+-]?\d{1,2})$/i.test(entry.score.trim()) && holes.every(hole => Number.isInteger(entry.holes[hole]));
+  const duplicates = new Set(entries.filter((entry, i) => entry.teamId && entries.some((other, j) => i !== j && other.teamId === entry.teamId)).map(entry => entry.teamId));
+  const readyEntries = entries.filter(entry => complete(entry) && !duplicates.has(entry.teamId));
+  function apply(batch, bulk = false) {
+    if (!batch.length) return;
+    try {
+      const message = window.applyScorecardImport(context, batch.map(({ teamId, score, holes }) => ({ teamId, score, holes })), bulk ? entries.length - batch.length : 0);
+      const savedIds = new Set(batch.map(entry => entry.id));
+      setEntries(items => items.filter(item => !savedIds.has(item.id)));
+      setContext(previous => ({ ...previous, existing: [...new Set([...previous.existing, ...batch.map(entry => entry.teamId)])] }));
+      setError("");
+      if (batch.length === entries.length && !running.current) dialog.current.close();
+      else {
+        setToast(message);
+        clearTimeout(toastTimer.current);
+        toastTimer.current = setTimeout(() => setToast(""), 4000);
+      }
+    } catch (error) { setError(error.message); }
+  }
+
+  return <>
+    <button type="button" className="button secondary admin-only scorecard-open" aria-label="Importar fotos" title="Importar fotos" onClick={open}>
+      <span className="scorecard-camera" aria-hidden="true">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3z" />
+          <circle cx="12" cy="13" r="3" />
+        </svg>
+      </span>
+    </button>
+    <dialog ref={dialog} className="hole-score-modal scorecard-import" aria-labelledby="scorecardTitle" onPaste={pasteImages}>
+      <div className="scorecard-heading">
+        <div><p className="eyebrow">{context?.label}</p><h2 id="scorecardTitle">Importar tarjetas de score</h2></div>
+        <button type="button" className="icon-button" aria-label="Cerrar" onClick={() => dialog.current.close()}>×</button>
+      </div>
+      <input ref={input} type="file" accept="image/jpeg,image/png,image/webp,image/bmp" multiple hidden onChange={event => { void readFiles(event.target.files); event.target.value = ""; }} />
+      <button type="button" className={`scorecard-drop ${over ? "is-over" : ""}`}
+        onClick={() => input.current.click()}
+        onDragOver={event => { event.preventDefault(); setOver(true); }}
+        onDragLeave={() => setOver(false)}
+        onDrop={event => { event.preventDefault(); setOver(false); void readFiles(event.dataTransfer.files); }}>
+        <span aria-hidden="true">↑</span><strong>Seleccionar fotos</strong><small>o pega o arrastra imágenes aquí</small>
+      </button>
+      {status && <div className="scorecard-reading">
+        <span role="status">{status}</span>
+        <progress max={100} value={progress ?? undefined} aria-label="Progreso de lectura de la foto" />
+      </div>}
+      {error && <p className="scorecard-error" role="alert">{error}</p>}
+      {entries.map(entry => {
+        const ready = readyEntries.includes(entry);
+        const team = context.teams.find(team => team.id === entry.teamId);
+        const summary = ready && (entry.reviewed || (entry.match && !entry.result.issue)) && !entry.editing;
+        return <section className={`scorecard-result${summary ? " is-confirmed" : ""}`} key={entry.id}>
+        {summary && <strong className="scorecard-total" aria-label={`Score: ${entry.score}`}>{entry.score}</strong>}
+        <div className="scorecard-entry-title">
+          <div>{summary ? <h3 title={entry.file}>{team.name}</h3> : <strong>{entry.file}</strong>}</div>
+          <div className="scorecard-entry-actions">
+            {summary && <button type="button" className="button secondary scorecard-upload-compact" onClick={() => apply([entry])}>Subir score</button>}
+            {summary && <button type="button" className="icon-button" aria-label={`Editar tarjeta de ${team.name}`} title="Editar tarjeta" disabled={busy} onClick={() => update(entry.id, { editing: true })}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m16 3 5 5M4 20l4-.8L21 6a2 2 0 0 0-3-3L5 16z" /></svg>
+            </button>}
+            <button type="button" className="icon-button" aria-label={`Quitar ${entry.file}`} title="Quitar tarjeta" disabled={busy} onClick={() => setEntries(items => items.filter(item => item.id !== entry.id))}>×</button>
+          </div>
+        </div>
+        {!summary && entry.result.names?.length > 0 && <p className="scorecard-player-names">{entry.result.names.join(" · ")}</p>}
+        {!summary && !entry.teamId && <p className="scorecard-error">Confirma a qué equipo pertenece esta tarjeta.</p>}
+        {!summary && entry.result.issue && <p className="scorecard-error">{entry.result.issue}</p>}
+        {duplicates.has(entry.teamId) && <p className="scorecard-error">Hay otra foto asignada a este equipo.</p>}
+        {entry.teamId && context.existing.includes(entry.teamId) && <p className="scorecard-error">Reemplazará un score guardado en esta semana.</p>}
+        {summary ? <dl className="scorecard-preview-values">
+          {holes.map(hole => <div key={hole}><dt>Hoyo {hole}</dt><dd>{holeOptions.find(([value]) => value === entry.holes[hole])?.[1]}</dd></div>)}
+        </dl> : <>
+        <div className="scorecard-values">
+          <label className="field">Equipo<select value={entry.teamId} onChange={event => update(entry.id, { teamId: event.target.value })}>
+            <option value="">Seleccionar equipo</option>{context.teams.map(team => <option key={team.id} value={team.id}>{team.name}</option>)}
+          </select></label>
+          <label className="field">Score<input value={entry.score} maxLength={3} placeholder="-8" onChange={event => update(entry.id, { score: event.target.value })} /></label>
+        </div>
+        <div className="scorecard-holes">{holes.map(hole => <label className="field" key={hole}>Hoyo {hole}<select value={entry.holes[hole] ?? ""} onChange={event => update(entry.id, { holes: { ...entry.holes, [hole]: event.target.value === "" ? undefined : Number(event.target.value) } })}>
+          <option value="">Sin lectura</option>{holeOptions.map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+        </select></label>)}</div>
+        {entry.raw && entry.result.issue && <details><summary>Texto OCR sin procesar</summary><pre>{entry.raw}</pre></details>}
+        </>}
+        {!summary && <div className="scorecard-result-actions">
+          {!summary && ready && <button type="button" className="button secondary" disabled={busy} onClick={() => update(entry.id, { editing: false, reviewed: true })}>Ver resumen</button>}
+          <button type="button" className="button secondary" disabled={!ready} onClick={() => apply([entry])}>Subir score</button>
+        </div>}
+      </section>;
+      })}
+      <div className="modal-actions">{toast && <div className="scorecard-toast" role="status">{toast}</div>}<button type="button" className="button secondary" onClick={() => dialog.current.close()}>Cerrar</button><button type="button" className="button primary" disabled={!readyEntries.length} onClick={() => apply(readyEntries, true)}>Aplicar listos{readyEntries.length ? ` (${readyEntries.length})` : ""}</button></div>
+    </dialog>
+  </>;
+}
