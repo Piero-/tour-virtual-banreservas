@@ -3442,7 +3442,7 @@ div.hole-score-summary { cursor: default; }
 #rouletteAccessControl[hidden] { display: none; }
 #rouletteAccessToggle:focus-visible + .switch-track { outline: 2px solid #e4c580; outline-offset: 3px; }
 #rouletteAccessToggle { accent-color: #006747; vertical-align: middle; }
-#paymentSummary, .concept-drag-preview { display: block; }
+#paymentSummary, .concept-drag-preview { display: block; min-width: 0; }
 #paymentSummary thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 #paymentSummary tbody { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 215px), 1fr)); gap: 10px; padding: 12px 0; }
 :is(#paymentSummary, .concept-drag-preview) tr { display: grid; grid-template-rows: auto auto 1fr; align-content: start; min-width: 0; border: 1px solid #385246; border-radius: 8px; padding: 8px 10px; background-color: #142a22; }
@@ -3581,12 +3581,19 @@ body::before {
 .payment-finance .finance-negative { color: #ffadad; }
 @media (max-width: 680px) {
   .finance-settings { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-  .payment-balance-table :is(th, td) { padding: 10px 8px; }
-  .payment-balance-table th:first-child { width: 54%; }
-  .payment-balance-table thead th:nth-child(2) { width: 46%; }
-  .payment-balance-table thead th:last-child { display: none; }
-  .payment-balance-table .balance-detail { display: none; }
-  .payment-balance-table .balance-balance .balance-amount { font-size: 15px; }
+  #paymentSummary { max-width: 100%; }
+  #paymentSummary tbody { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; padding: 8px 0; }
+  :is(#paymentSummary, .concept-drag-preview) tr[data-concept] { padding: 7px 8px; border-radius: 6px; }
+  :is(#paymentSummary, .concept-drag-preview) tr[data-concept] > :is(th, td) { min-width: 0; padding: 1px 0; white-space: normal; overflow-wrap: anywhere; }
+  :is(#paymentSummary, .concept-drag-preview) tr[data-concept] > th { font-size: 10px; line-height: 1.25; }
+  :is(#paymentSummary, .concept-drag-preview) tr[data-concept] > .balance-amount { font-size: 14px; line-height: 1.3; }
+  :is(#paymentSummary, .concept-drag-preview) tr[data-concept] > .balance-detail { font-size: 10px; line-height: 1.35; }
+  .payment-balance-table .concept-grip { width: 20px; height: 27px; margin-inline-end: 4px; font-size: 16px; }
+  .payment-balance-table .balance-progress { padding-top: 6px; gap: 3px; font-size: 10px; }
+  .payment-balance-table .balance-progress progress { max-width: 100%; }
+}
+@media (max-width: 310px) {
+  #paymentSummary tbody { grid-template-columns: minmax(0, 1fr); }
 }
 .captain-reveal, .captain-round-break { padding: 32px 0; }
 .captain-reveal ol { list-style: none; padding: 0; margin: 24px 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 24px; }
