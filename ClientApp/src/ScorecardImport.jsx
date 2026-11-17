@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { matchScorecardTeam, readScorecard, readSimulatorCard } from "./scorecard-ocr";
+import { learnScorecardAliases, matchScorecardTeam, readScorecard, readSimulatorCard } from "./scorecard-ocr";
 import { readScrambleAtlas, recognizeSimulatorDigits, recognizeSimulatorNames, simulatorAtlas, simulatorGrid } from "./simulator-ocr";
 
 const holeOptions = [[2, "D. Bogey (+2)"], [1, "Bogey (+1)"], [0, "Par (E)"], [-1, "Birdie (-1)"], [-2, "Eagle (-2)"], [-3, "Albatross (-3)"]];
-const holes = [18, 17, 16];
+const holes = [16, 17, 18];
 const accepted = /\.(jpe?g|png|webp|bmp)$/i;
 const acceptedMime = /^image\/(jpeg|png|webp|bmp|x-ms-bmp)$/i;
 
@@ -108,9 +108,12 @@ export default function ScorecardImport({ mobileCameraSlot }) {
     setStatus("Preparando lector OCR…");
     let worker;
     try {
+      const aliasesRequest = window.requestScorecardAliases(context)
+        .then(response => response.ok ? response.json() : null).then(data => data?.aliases ?? []).catch(() => []);
       const { createWorker } = await import("tesseract.js");
       worker = await createWorker("eng");
       await worker.setParameters({ preserve_interword_spaces: "1" });
+      const aliases = await aliasesRequest;
       let index = 0;
       while (pending.current.length) {
         const file = pending.current.shift();
@@ -135,7 +138,7 @@ export default function ScorecardImport({ mobileCameraSlot }) {
           }
           if (simulator.length) {
             const results = simulator.map((result, groupIndex) => {
-              const match = matchScorecardTeam(result.names, context.teams);
+              const match = matchScorecardTeam(result.names, context.teams, aliases);
               return { id: ++nextId.current, file: `${file.name} · Grupo ${groupIndex + 1}`, raw, result, match,
                 teamId: match?.team.id || "", score: result.score, holes: result.holes };
             });
@@ -150,11 +153,11 @@ export default function ScorecardImport({ mobileCameraSlot }) {
           const spatial = readScorecard(raw);
           const plain = readScorecard(data.text || "");
           let result = !spatial.issue ? spatial : plain.score ? plain : spatial;
-          let match = matchScorecardTeam([...spatial.names, ...plain.names], context.teams);
+          let match = matchScorecardTeam([...spatial.names, ...plain.names], context.teams, aliases);
           let recognized = raw;
           if (result.issue || !match) {
             const alternate = readScorecard(dense.text || "");
-            match = matchScorecardTeam([...spatial.names, ...plain.names, ...alternate.names], context.teams);
+            match = matchScorecardTeam([...spatial.names, ...plain.names, ...alternate.names], context.teams, aliases);
             if (!alternate.issue || (!result.score && alternate.score)) {
               result = alternate;
               recognized = dense.text;
@@ -217,7 +220,18 @@ export default function ScorecardImport({ mobileCameraSlot }) {
   function apply(batch, bulk = false) {
     if (!batch.length) return;
     try {
-      const message = window.applyScorecardImport(context, batch.map(({ teamId, score, holes }) => ({ teamId, score, holes })), bulk ? entries.length - batch.length : 0);
+      const learned = batch.flatMap(entry => {
+        const team = context.teams.find(item => item.id === entry.teamId);
+        return team ? learnScorecardAliases(entry.result.names ?? [], team, context.teams) : [];
+      });
+      const messagesByKey = new Map();
+      for (const alias of learned) {
+        const prior = messagesByKey.get(alias.key);
+        if (prior === undefined) messagesByKey.set(alias.key, alias);
+        else if (prior && prior.teamId !== alias.teamId) messagesByKey.set(alias.key, null);
+      }
+      const aliases = [...messagesByKey.values()].filter(Boolean);
+      const message = window.applyScorecardImport(context, batch.map(({ teamId, score, holes }) => ({ teamId, score, holes })), bulk ? entries.length - batch.length : 0, aliases);
       const savedIds = new Set(batch.map(entry => entry.id));
       setEntries(items => items.filter(item => !savedIds.has(item.id)));
       setContext(previous => ({ ...previous, existing: [...new Set([...previous.existing, ...batch.map(entry => entry.teamId)])] }));
@@ -275,13 +289,24 @@ export default function ScorecardImport({ mobileCameraSlot }) {
       {entries.map(entry => {
         const ready = readyEntries.includes(entry);
         const team = context.teams.find(team => team.id === entry.teamId);
+        const alreadySaved = team && context.existing.includes(team.id);
+        const duplicated = team && duplicates.has(team.id);
         const summary = ready && (entry.reviewed || (entry.match && !entry.result.issue)) && !entry.editing;
-        return <section className={`scorecard-result${summary ? " is-confirmed" : ""}`} key={entry.id}>
-        {summary && <strong className="scorecard-total" aria-label={`Score: ${entry.score}`}>{entry.score}</strong>}
+        return <section className={`scorecard-result ${summary ? "is-confirmed" : "needs-review"}`} key={entry.id}>
+        {summary ? <strong className="scorecard-total" aria-label={`Score: ${entry.score}`}>{entry.score}</strong> :
+          <label className="scorecard-total scorecard-edit-total">
+            <input aria-label="Score" value={entry.score} maxLength={3} placeholder="—" onChange={event => update(entry.id, { score: event.target.value })} />
+          </label>}
         <div className="scorecard-entry-title">
-          <div>{summary ? <h3 title={entry.file}>{team.name}</h3> : <strong>{entry.file}</strong>}</div>
+          {summary ? <h3 title={entry.file}>{team.name}</h3> : <div className="scorecard-review-heading">
+            <small>{entry.editing ? "Editar tarjeta" : "Revisar tarjeta"}</small>
+            <select aria-label="Equipo" title={entry.file} value={entry.teamId} onChange={event => update(entry.id, { teamId: event.target.value })}>
+              <option value="">Seleccionar equipo</option>{context.teams.map(team => <option key={team.id} value={team.id}>{team.name}</option>)}
+            </select>
+          </div>}
           <div className="scorecard-entry-actions">
-            {summary && <button type="button" className="button secondary scorecard-upload-compact" onClick={() => apply([entry])}>Subir score</button>}
+            {(summary || ready) && <button type="button" className="button secondary scorecard-upload-compact" onClick={() => apply([entry])}>Subir score</button>}
+            {!summary && ready && <button type="button" className="icon-button" aria-label="Ver resumen" title="Ver resumen" disabled={busy} onClick={() => update(entry.id, { editing: false, reviewed: true })}>✓</button>}
             {summary && <button type="button" className="icon-button" aria-label={`Editar tarjeta de ${team.name}`} title="Editar tarjeta" disabled={busy} onClick={() => update(entry.id, { editing: true })}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m16 3 5 5M4 20l4-.8L21 6a2 2 0 0 0-3-3L5 16z" /></svg>
             </button>}
@@ -291,26 +316,15 @@ export default function ScorecardImport({ mobileCameraSlot }) {
         {!summary && entry.result.names?.length > 0 && <p className="scorecard-player-names">{entry.result.names.join(" · ")}</p>}
         {!summary && !entry.teamId && <p className="scorecard-error">Confirma a qué equipo pertenece esta tarjeta.</p>}
         {!summary && entry.result.issue && <p className="scorecard-error">{entry.result.issue}</p>}
-        {duplicates.has(entry.teamId) && <p className="scorecard-error">Hay otra foto asignada a este equipo.</p>}
-        {entry.teamId && context.existing.includes(entry.teamId) && <p className="scorecard-error">Reemplazará un score guardado en esta semana.</p>}
+        {(duplicated || alreadySaved) && <p className="scorecard-error scorecard-duplicate-note"><strong>{team.name} ya está registrado.</strong>{duplicated ? " Hay otra tarjeta para este equipo." : " Subirlo reemplazará el score de esta semana."}</p>}
         {summary ? <dl className="scorecard-preview-values">
           {holes.map(hole => <div key={hole}><dt>Hoyo {hole}</dt><dd>{holeOptions.find(([value]) => value === entry.holes[hole])?.[1]}</dd></div>)}
         </dl> : <>
-        <div className="scorecard-values">
-          <label className="field">Equipo<select value={entry.teamId} onChange={event => update(entry.id, { teamId: event.target.value })}>
-            <option value="">Seleccionar equipo</option>{context.teams.map(team => <option key={team.id} value={team.id}>{team.name}</option>)}
-          </select></label>
-          <label className="field">Score<input value={entry.score} maxLength={3} placeholder="-8" onChange={event => update(entry.id, { score: event.target.value })} /></label>
-        </div>
         <div className="scorecard-holes">{holes.map(hole => <label className="field" key={hole}>Hoyo {hole}<select value={entry.holes[hole] ?? ""} onChange={event => update(entry.id, { holes: { ...entry.holes, [hole]: event.target.value === "" ? undefined : Number(event.target.value) } })}>
           <option value="">Sin lectura</option>{holeOptions.map(([value, label]) => <option value={value} key={value}>{label}</option>)}
         </select></label>)}</div>
         {entry.raw && entry.result.issue && <details><summary>Texto OCR sin procesar</summary><pre>{entry.raw}</pre></details>}
         </>}
-        {!summary && <div className="scorecard-result-actions">
-          {!summary && ready && <button type="button" className="button secondary" disabled={busy} onClick={() => update(entry.id, { editing: false, reviewed: true })}>Ver resumen</button>}
-          <button type="button" className="button secondary" disabled={!ready} onClick={() => apply([entry])}>Subir score</button>
-        </div>}
       </section>;
       })}
       <div className={`modal-actions${readyEntries.length ? " has-ready" : ""}${toast ? " has-toast" : ""}`}>{toast && <div className="scorecard-toast" role="status">{toast}</div>}<button type="button" className="button secondary scorecard-footer-close" onClick={() => dialog.current.close()}>Cerrar</button><button type="button" className="button primary scorecard-apply-ready" disabled={!readyEntries.length} onClick={() => apply(readyEntries, true)}>Aplicar listos{readyEntries.length ? ` (${readyEntries.length})` : ""}</button></div>

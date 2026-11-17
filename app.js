@@ -362,7 +362,7 @@ function saveState(immediate = false) {
   lastKnownStateJson = JSON.stringify(appState);
   if (!isApplyingRemoteState && isAdminMode()) {
     lastLocalSaveAt = Date.now();
-    queueApiSave(immediate);
+    return queueApiSave(immediate);
   }
 }
 
@@ -384,15 +384,20 @@ function queueApiSave(immediate = false) {
       .then((response) => {
         if (response.status === 401) {
           logoutAdmin();
-          return;
+          return false;
         }
         if (!response.ok) throw new Error("No se pudo guardar el cambio");
         lastKnownStateJson = snapshot;
         refreshPaymentAudit();
+        return true;
       })
-      .catch((error) => console.warn("No se pudo guardar en el backend", error));
+      .catch((error) => {
+        console.warn("No se pudo guardar en el backend", error);
+        return false;
+      });
+    return apiSaveChain;
   };
-  if (immediate) send();
+  if (immediate) return send();
   else apiSaveTimer = window.setTimeout(send, 350);
 }
 
@@ -462,6 +467,11 @@ function updateAccessUi() {
   if (signOutButton) signOutButton.hidden = !adminToken;
   const manageUsersButton = document.querySelector("#manageUsersButton");
   if (manageUsersButton) manageUsersButton.hidden = !adminToken || currentUser?.username !== "piero";
+  const intelligenceButton = document.querySelector("#intelligenceButton");
+  if (intelligenceButton) {
+    intelligenceButton.hidden = !adminToken || currentUser?.username !== "piero";
+    intelligenceButton.href = `${CATEGORY_ROUTES[appState.activeCategory]}/inteligencia`;
+  }
 
   [els.teamCountInput, els.weekLimitInput, els.finalDonationInput].forEach((input) => {
     if (input) input.disabled = !isAdmin;
@@ -2896,20 +2906,34 @@ els.doubleToggle.addEventListener("change", () => {
   renderReport();
 });
 
+function scorecardSeason() {
+  const archive = appState.archives.findLast(item => (item.categoryId || "A") === appState.activeCategory);
+  return `${state.registrationId || ""}:${archive?.id || ""}`;
+}
+
+window.requestScorecardAliases = (context, method = "GET", body) => {
+  const query = new URLSearchParams({ category: context.category, season: context.season });
+  return fetch(`${API_STATE_URL.replace(/\/state$/, "/scorecard-aliases")}?${query}`, {
+    method, cache: "no-store", headers: { Authorization: `Bearer ${adminToken}`, "Content-Type": "application/json" },
+    body: body && JSON.stringify(body),
+  });
+};
+
 window.getScorecardImportContext = () => {
   if (!requireAdmin()) return null;
   const week = getWeek();
-  return { category: appState.activeCategory, week: activeWeek, label: weekDisplayName(activeWeek),
-    draftKey: `tour-scorecard-draft:${currentUser?.username || "admin"}:${appState.activeCategory}:${activeWeek}`,
+  const season = scorecardSeason();
+  return { category: appState.activeCategory, season, week: activeWeek, label: weekDisplayName(activeWeek),
+    draftKey: `tour-scorecard-draft:${currentUser?.username || "admin"}:${appState.activeCategory}:${activeWeek}${season === ":" ? "" : ":" + season}`,
     teams: structuredClone(getActiveTeams()), existing: Object.keys(week.scores || {}) };
 };
 
 window.notifyScorecardImportBusy = () => showToast("La importación de la otra semana todavía está en curso.", "error");
 
-window.applyScorecardImport = (context, entries, ignored = 0) => {
+window.applyScorecardImport = (context, entries, ignored = 0, aliases = []) => {
   if (!requireAdmin()) throw new Error("Inicia sesión como administrador.");
-  if (context.category !== appState.activeCategory || context.week !== activeWeek) {
-    throw new Error("Cambió la semana o categoría activa. Vuelve a abrir la importación.");
+  if (context.category !== appState.activeCategory || context.week !== activeWeek || context.season !== scorecardSeason()) {
+    throw new Error("Cambió la semana, categoría o temporada. Vuelve a abrir la importación.");
   }
   const teamIds = new Set(getActiveTeams().map(team => team.id));
   const ids = new Set();
@@ -2935,7 +2959,15 @@ window.applyScorecardImport = (context, entries, ignored = 0) => {
   renderPlacements();
   renderStandings();
   renderReport();
-  saveState(true);
+  const saved = saveState(true);
+  const token = adminToken;
+  if (aliases.length) saved?.then(async ok => {
+    if (!ok || token !== adminToken) return;
+    const body = { aliases: aliases.filter(alias => ids.has(alias.teamId)) };
+    let response = await window.requestScorecardAliases(context, "POST", body);
+    if (response.status === 409 && token === adminToken) response = await window.requestScorecardAliases(context, "POST", body);
+    if (!response.ok) throw new Error(`Alias save failed: ${response.status}`);
+  }).catch(error => console.warn("No se pudieron guardar los aliases OCR", error));
   const message = `${results.length} ${results.length === 1 ? "equipo subido" : "equipos subidos"} · ${ignored} ${ignored === 1 ? "score ignorado" : "scores ignorados"}`;
   showToast(message);
   return message;

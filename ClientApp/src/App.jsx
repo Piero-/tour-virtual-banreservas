@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import Roulette from "./Roulette";
 import ScorecardImport from "./ScorecardImport";
+import IntelligenceCenter from "./IntelligenceCenter";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 const API_STATE_URL = `${API_BASE_URL}/api/state`;
@@ -9,6 +10,7 @@ const API_AUTH_URL = `${API_BASE_URL}/api/auth/login`;
 
 export default function App() {
   const roulettePage = /\/ruleta\/?$/.test(location.pathname);
+  const intelligencePage = /^\/tour-[ac]\/inteligencia\/?$/.test(location.pathname);
   const [ready, setReady] = useState(false);
   const [mobileCameraSlot, setMobileCameraSlot] = useState(null);
   const [paymentsCollapsed, setPaymentsCollapsed] = useState(() => {
@@ -39,7 +41,7 @@ export default function App() {
           if (session.ok) window.TOUR_USER = await session.json();
         } catch { /* Keep the saved session when the server is temporarily unavailable. */ }
       }
-      try {
+      if (!intelligencePage) try {
         const response = await fetch(API_STATE_URL);
         if (response.ok) {
           const data = await response.json();
@@ -59,10 +61,10 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [intelligencePage]);
 
   useEffect(() => {
-    if (!ready || booted.current) return;
+    if (!ready || booted.current || intelligencePage) return;
     booted.current = true;
 
     const script = document.createElement("script");
@@ -70,10 +72,10 @@ export default function App() {
       const { downloadSeasonPdf } = await import("./season-pdf");
       return downloadSeasonPdf(archive);
     };
-    script.src = "/legacy-app.js?v=20261115-scorecard-paste";
+    script.src = "/legacy-app.js?v=20261116-intelligence-page";
     script.async = false;
     document.body.appendChild(script);
-  }, [ready]);
+  }, [ready, intelligencePage]);
 
   if (!ready) {
     return (
@@ -94,6 +96,8 @@ export default function App() {
       </main>
     );
   }
+
+  if (intelligencePage) return <IntelligenceCenter apiBase={API_BASE_URL} />;
 
   return (
     <>
@@ -144,6 +148,7 @@ export default function App() {
               </div>
               <div className="tour-settings-users admin-only">
                 <button id="manageUsersButton" className="button secondary" type="button" hidden>Usuarios</button>
+                <a id="intelligenceButton" className="button secondary" href="/tour-a/inteligencia" hidden>Centro de inteligencia</a>
               </div>
               <form method="dialog" className="modal-actions"><button className="button secondary">Cerrar</button></form>
             </dialog>

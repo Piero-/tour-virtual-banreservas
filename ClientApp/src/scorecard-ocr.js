@@ -22,14 +22,80 @@ function similarity(raw, registered) {
   return edits + a.length - i + b.length - j <= 1 ? .7 : 0;
 }
 
-export function matchScorecardTeam(names, teams) {
-  const roster = teams.flatMap(team => Object.values(team.members || {}).filter(Boolean)
-    .map((name, index) => ({ team, id: team.id + ":" + index, name })));
+function closestMember(raw, team) {
+  const key = normalize(raw);
+  const hits = Object.entries(team.members || {}).filter(([, name]) => name)
+    .map(([slot, name]) => {
+      const given = normalize(name).split(" ")[0];
+      const first = key.split(" ")[0];
+      let shared = 0;
+      while (shared < Math.min(first.length, given.length) && first[shared] === given[shared]) shared++;
+      const similarPrefix = shared >= 3 && (shared === first.length || shared === given.length ||
+        shared >= Math.max(first.length, given.length) - 2);
+      return { slot, name, confidence: Math.max(similarity(raw, name), similarPrefix ? .7 : 0) };
+    })
+    .filter(hit => hit.confidence >= .7).sort((a, b) => b.confidence - a.confidence);
+  return hits[0]?.confidence > (hits[1]?.confidence ?? 0) ? hits[0] : null;
+}
+
+export function resolveScorecardAlias(alias, teams) {
+  const team = teams.find(item => item.id === alias.teamId);
+  if (!team || alias.manual || (alias.memberSlot &&
+      normalize(team.members?.[alias.memberSlot]) === normalize(alias.memberName))) return alias;
+  const member = closestMember(alias.raw, team);
+  return member ? { ...alias, memberSlot: member.slot, memberName: member.name } : alias;
+}
+
+export function learnScorecardAliases(names, team, teams = [team]) {
+  const members = Object.entries(team.members || {}).filter(([, name]) => name);
+  if (!members.length) return [];
+  const otherRosterNames = teams.filter(item => item.id !== team.id)
+    .flatMap(item => Object.values(item.members || {})).map(normalize);
+  const unique = new Map();
+  for (const name of names) {
+    const raw = name.trim(), key = normalize(raw);
+    if (key.replace(/ /g, "").length < 3 || raw.length > 80 || !/^\p{L}[\p{L}\p{M} .'-]*$/u.test(raw)
+        || unique.has(key)) continue;
+    const person = closestMember(raw, team);
+    const conflict = otherRosterNames.includes(key);
+    if (conflict && !person) continue;
+    unique.set(key, { key, raw, teamId: team.id, memberSlot: person?.slot ?? "", memberName: person?.name ?? "",
+      pending: person?.confidence !== 1 });
+  }
+  return [...unique.values()];
+}
+
+export function matchScorecardTeam(names, teams, aliases = []) {
+  const roster = teams.flatMap(team => Object.entries(team.members || {}).filter(([, name]) => name)
+    .map(([slot, name]) => ({ team, id: team.id + ":" + slot, name })));
+  const learned = new Map(aliases.filter(entry => !entry.pending && !entry.denied).map(entry => {
+    const alias = resolveScorecardAlias(entry, teams);
+    return [alias.key, alias];
+  }));
   const evidence = new Map();
   const sharedExact = new Map();
+  const conflictingAliases = new Map();
+  const teamEvidence = new Map();
   for (const raw of new Set(names.map(normalize))) {
     const hits = roster.map(person => ({ ...person, confidence: similarity(raw, person.name) }))
-      .filter(hit => hit.confidence >= .7).sort((a, b) => b.confidence - a.confidence);
+      .filter(hit => hit.confidence >= .7)
+      .sort((a, b) => b.confidence - a.confidence);
+    const alias = learned.get(raw);
+    const aliasTeam = alias && teams.find(team => team.id === alias.teamId);
+    const person = aliasTeam && roster.find(member => member.id === alias.teamId + ":" + alias.memberSlot &&
+      normalize(member.name) === normalize(alias.memberName));
+    if (person && hits.some(hit => hit.confidence === 1 && hit.team.id !== alias.teamId)) {
+      const matches = conflictingAliases.get(aliasTeam.id) ?? [];
+      matches.push({ ...person, confidence: .95, raw });
+      conflictingAliases.set(aliasTeam.id, matches);
+    }
+    if (aliasTeam && !hits.some(hit => hit.confidence >= .92 && hit.team.id !== alias.teamId)) {
+      if (person && !hits.some(hit => hit.confidence === 1)) {
+        if ((evidence.get(person.id)?.confidence ?? 0) < .95) evidence.set(person.id, { ...person, confidence: .95, raw });
+        continue;
+      }
+      if (!alias.memberSlot && !hits.length) teamEvidence.set(aliasTeam.id, { confidence: .7, raw });
+    }
     const best = hits[0];
     if (!best) continue;
     if (hits[1]?.confidence === best.confidence) {
@@ -44,6 +110,13 @@ export function matchScorecardTeam(names, teams) {
       const local = hits.filter(hit => hit.team.id === team.id);
       if (local.length === 1 && !matches.some(hit => hit.id === local[0].id)) matches.push({ ...local[0], raw });
     }
+    for (const alias of conflictingAliases.get(team.id) ?? []) {
+      if (matches.some(hit => hit.raw !== alias.raw && hit.id !== alias.id) &&
+          !matches.some(hit => hit.id === alias.id || hit.raw === alias.raw)) matches.push(alias);
+    }
+    const savedTeamHit = teamEvidence.get(team.id);
+    if (savedTeamHit && matches.length && !matches.some(hit => hit.raw === savedTeamHit.raw) &&
+        ![...evidence.values()].some(hit => hit.team.id !== team.id)) matches.push(savedTeamHit);
     return { team, matches, weight: matches.reduce((sum, item) => sum + item.confidence, 0) };
   }).filter(item => item.matches.length >= 2).sort((a, b) => b.matches.length - a.matches.length || b.weight - a.weight);
   if (candidates.length > 1 && !(candidates[0].matches.length === 3 &&

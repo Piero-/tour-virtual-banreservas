@@ -3209,6 +3209,7 @@ body {
 .scorecard-preview-values dd { margin: 0; font-size: 11px; font-weight: 700; overflow-wrap: anywhere; }
 .scorecard-result p { margin: 5px 0 9px; font-size: 12px; }
 .scorecard-error { color: #ffbdac; }
+.scorecard-result .scorecard-duplicate-note { margin: 3px 0 5px; font-size: 11px; overflow-wrap: anywhere; }
 .scorecard-values, .scorecard-holes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 90px); gap: 8px; margin: 8px 0; }
 .scorecard-holes { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .scorecard-import .field { min-width: 0; font-size: 12px; }

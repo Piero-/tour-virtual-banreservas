@@ -120,6 +120,33 @@ app.MapGet("/api/section-order", async (HttpContext context, AppDbContext db) =>
     return Results.Text(row?.Json ?? "null", "application/json");
 });
 
+app.MapGet("/api/scorecard-aliases", async (string category, string? season, HttpContext context, AppDbContext db) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var user = await UserAuth.Current(context, db);
+    if (user is null) return Results.Unauthorized();
+    if (season is null && user.Username != "piero") return Results.StatusCode(403);
+    var scope = await ScorecardAliases.Open(db, category, season);
+    if (scope is null) return Results.Conflict();
+    return Results.Ok(new { aliases = scope.Entries, revision = scope.Revision, season = scope.Season,
+        teams = season is null ? scope.Teams : null });
+});
+
+app.MapMethods("/api/scorecard-aliases", new[] { "POST", "PUT" },
+    async (string category, string season, ScorecardAliasUpdate update, HttpContext context, AppDbContext db) =>
+{
+    var user = await UserAuth.Current(context, db);
+    if (user is null) return Results.Unauthorized();
+    var replace = HttpMethods.IsPut(context.Request.Method);
+    if (replace && user.Username != "piero") return Results.StatusCode(403);
+    var scope = await ScorecardAliases.Open(db, category, season);
+    if (scope is null || (replace && update.Revision != scope.Revision)) return Results.Conflict();
+    var entries = scope.Prepare(update.Aliases, replace, user.Username);
+    if (entries is null) return Results.BadRequest();
+    if (await scope.Save(db, entries)) return Results.NoContent();
+    return Results.Conflict();
+});
+
 app.MapPut("/api/section-order", async (string[] order, HttpContext context, AppDbContext db) =>
 {
     var user = await UserAuth.Current(context, db);

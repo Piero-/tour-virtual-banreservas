@@ -5,6 +5,8 @@
   "rewrites": [
     { "source": "/tour-a/ruleta", "destination": "/" },
     { "source": "/tour-c/ruleta", "destination": "/" },
+    { "source": "/tour-a/inteligencia", "destination": "/" },
+    { "source": "/tour-c/inteligencia", "destination": "/" },
     {
       "source": "/api/(.*)",
       "destination": "https://tour-virtual-banreservas-api.onrender.com/api/$1"

@@ -14,22 +14,27 @@ export function simulatorGrid(words) {
   const near = points.filter(point => point.x > header.x + rowStep && Math.abs(point.y - header.y) < rowStep * .75);
   const h8 = near.find(point => point.text === "8");
   const h2 = near.find(point => point.text === "2" && point.x < h8?.x);
-  const h18 = near.find(point => point.text === "18");
-  if (!h8 || !h18) return null;
+  const h17 = near.find(point => point.text === "17" && point.x > h8?.x);
+  const h18 = near.find(point => point.text === "18" || (point.text === "1B" && h17 &&
+    point.x - h17.x > rowStep * .7 && point.x - h17.x < rowStep * 1.5));
+  const rightAnchor = h18 || h17;
+  if (!h8 || !rightAnchor) return null;
   const leftAnchor = h2 || h8;
   const leftSlot = h2 ? 1 : 7;
-  const step = (h18.x - leftAnchor.x) / (18 - leftSlot);
+  const rightSlot = h18 ? 18 : 17;
+  const step = (rightAnchor.x - leftAnchor.x) / (rightSlot - leftSlot);
   if (step < 8) return null;
   const x0 = leftAnchor.x - step * leftSlot;
-  const slope = (h18.y - leftAnchor.y) / (h18.x - leftAnchor.x);
+  const slope = (rightAnchor.y - leftAnchor.y) / (rightAnchor.x - leftAnchor.x);
   const distanceWords = points.filter(point => /^\d{3,5}$/.test(point.text) && point.x > x0 - step * .5 &&
     Math.abs(point.y - distance.y - slope * (point.x - distance.x)) < rowStep * .4);
   const offset = column => {
     const x = x0 + column * step;
     const match = distanceWords.find(point => Math.abs(point.x - x) < step * .43);
-    return match ? match.x - x : 0;
+    return match ? match.x - x : null;
   };
-  const left = offset(0), right = offset(20);
+  const left = offset(0) ?? offset(1) ?? 0;
+  const right = offset(20) ?? offset(19) ?? offset(18) ?? 0;
   return { step, rowStep, x0, slope, distance, left, right };
 }
 
@@ -91,7 +96,7 @@ export async function recognizeSimulatorDigits(worker, encode, atlas, onProgress
     for (const mode of ["8", "10", "6"]) {
       const result = await worker.recognize(image, { tessedit_pageseg_mode: mode, tessedit_char_whitelist: "0123456789" });
       const value = result.data.text.trim();
-      if (column === 20 ? /^\d{2,3}$/.test(value) : /^\d{1,2}$/.test(value)) {
+      if (column === 20 ? /^\d{2,3}$/.test(value) : row === 0 ? /^[3-6]$/.test(value) : /^\d{1,2}$/.test(value)) {
         text = value;
         break;
       }
