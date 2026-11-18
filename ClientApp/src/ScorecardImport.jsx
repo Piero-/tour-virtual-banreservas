@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { learnScorecardAliases, matchScorecardTeam, readScorecard, readSimulatorCard } from "./scorecard-ocr";
 import { readScrambleAtlas, recognizeSimulatorDigits, recognizeSimulatorNames, simulatorAtlas, simulatorGrid } from "./simulator-ocr";
+import { bindPhotoImportEvents } from "./photo-import-events";
 
 const holeOptions = [[2, "D. Bogey (+2)"], [1, "Bogey (+1)"], [0, "Par (E)"], [-1, "Birdie (-1)"], [-2, "Eagle (-2)"], [-3, "Albatross (-3)"]];
 const holes = [16, 17, 18];
@@ -94,8 +95,19 @@ export default function ScorecardImport({ mobileCameraSlot }) {
     setContext(next);
     setToast("");
     dialog.current.showModal();
+    return next;
   }
-  async function readFiles(collection) {
+  useEffect(() => bindPhotoImportEvents(document, {
+    enabled: () => document.body.classList.contains("is-admin") && /^\/(?:tour-[ac]\/?)?$/.test(location.pathname),
+    importFiles: files => {
+      const next = open();
+      if (!next) return;
+      setOver(false);
+      void readFiles(files, next);
+    },
+  }));
+  async function readFiles(collection, importContext = context) {
+    const context = importContext;
     if (!context) return;
     const selected = Array.from(collection);
     const files = selected.filter(file => (accepted.test(file.name) || acceptedMime.test(file.type)) && file.size <= 25 * 1024 * 1024)
@@ -184,14 +196,6 @@ export default function ScorecardImport({ mobileCameraSlot }) {
       try { await worker?.terminate(); } catch { /* The worker may already be closed. */ }
     }
   }
-  function pasteImages(event) {
-    const files = [...(event.clipboardData?.items || [])].filter(item => item.kind === "file" && item.type.startsWith("image/"))
-      .map(item => item.getAsFile()).filter(Boolean);
-    const images = files.length ? files : [...(event.clipboardData?.files || [])].filter(file => file.type.startsWith("image/"));
-    if (!images.length) return;
-    event.preventDefault();
-    void readFiles(images);
-  }
   async function pasteFromClipboard() {
     if (readingClipboard) return;
     if (!navigator.clipboard?.read) {
@@ -260,7 +264,7 @@ export default function ScorecardImport({ mobileCameraSlot }) {
   return <>
     {cameraButton("scorecard-open-desktop")}
     {mobileCameraSlot && createPortal(cameraButton("scorecard-open-mobile"), mobileCameraSlot)}
-    <dialog ref={dialog} className="hole-score-modal scorecard-import" aria-labelledby="scorecardTitle" data-draft-key={draftKey} onPaste={pasteImages}>
+    <dialog ref={dialog} className="hole-score-modal scorecard-import" aria-labelledby="scorecardTitle" data-draft-key={draftKey}>
       <div className="scorecard-import-top">
       <div className="scorecard-heading">
         <div><p className="eyebrow">{context?.label}</p><h2 id="scorecardTitle">Importar tarjetas de score</h2></div>
