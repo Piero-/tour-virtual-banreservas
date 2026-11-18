@@ -7,7 +7,7 @@ export function simulatorGrid(words) {
   const points = words.map(center);
   const index = points.find(point => /^(INDEX|[I1L]NDEX)$/i.test(point.text));
   const distance = points.find(point => /^DISTANCE$/i.test(point.text) && point.y > index?.y && Math.abs(point.x - index.x) < 65);
-  if (!distance) return null;
+  if (!distance) return rectangularGrid(points);
   const rowStep = distance.y - index.y;
   const header = points.find(point => /^(HOLE|HOYO)$/i.test(point.text) && point.y < index.y)
     || { x: index.x, y: index.y - 2 * rowStep };
@@ -18,7 +18,7 @@ export function simulatorGrid(words) {
   const h18 = near.find(point => point.text === "18" || (point.text === "1B" && h17 &&
     point.x - h17.x > rowStep * .7 && point.x - h17.x < rowStep * 1.5));
   const rightAnchor = h18 || h17;
-  if (!h8 || !rightAnchor) return null;
+  if (!h8 || !rightAnchor) return rectangularGrid(points);
   const leftAnchor = h2 || h8;
   const leftSlot = h2 ? 1 : 7;
   const rightSlot = h18 ? 18 : 17;
@@ -38,6 +38,37 @@ export function simulatorGrid(words) {
   return { step, rowStep, x0, slope, distance, left, right };
 }
 
+function rectangularGrid(points) {
+  const label = points.find(point => /Distance$/i.test(point.text));
+  const header = points.find(point => /^Hole$/i.test(point.text) && point.y < label?.y && label.y - point.y < 160);
+  if (!label || !header) return null;
+  const distances = points.filter(point => /^\d{3,4}$/.test(point.text) && point.x > header.x + 90 &&
+    Math.abs(point.y - label.y) < 16).sort((a, b) => a.x - b.x);
+  if (distances.length < 16) return null;
+  const first = distances[0], second = distances[1];
+  const step = second.x - first.x;
+  if (step < 12 || step > 65) return null;
+  const slots = Array(21);
+  let slot = 0;
+  for (const point of distances) {
+    if (point.x - first.x > step * 21) break;
+    if (slot && point.x - slots[slot - 1] > step * 1.5) slot++;
+    if (slot > 20) break;
+    slots[slot++] = point.x;
+  }
+  for (let i = 0; i < 21; i++) if (slots[i] === undefined) {
+    slots[i] = i > 1 ? slots[i - 1] + (slots[i - 1] - slots[i - 2]) : first.x + step * i;
+  }
+  const holeOne = points.find(point => point.text === "1" && Math.abs(point.x - first.x) < step * .3 &&
+    Math.abs(point.y - header.y) < 20);
+  const parOne = points.find(point => /^[3-6]$/.test(point.text) && Math.abs(point.x - first.x) < step * .3 &&
+    point.y > (holeOne?.y ?? header.y) + 20 && point.y < (holeOne?.y ?? header.y) + 45);
+  if (!holeOne || !parOne) return null;
+  const rowStep = parOne.y - holeOne.y;
+  return { rectangular: true, step, rowStep, x0: first.x, slope: .008, left: 2, right: -2,
+    nameX: header.x, columns: slots, distance: { x: first.x, y: holeOne.y + 3 * rowStep } };
+}
+
 const CELL_W = 92, CELL_H = 76, PAD = 20;
 export function simulatorAtlas(image, grid) {
   const width = PAD * 2 + CELL_W * 21, height = PAD * 2 + CELL_H * 7;
@@ -49,36 +80,51 @@ export function simulatorAtlas(image, grid) {
   for (let row = 0; row < 7; row++) for (let column = 0; column < 21; column++) {
     const count = row === 0 ? -2 : row;
     const xShift = (grid.left + (grid.right - grid.left) * column / 20) * (3 + count) / 3;
-    const x = grid.x0 + column * grid.step + xShift;
-    const y = grid.distance.y + grid.slope * (x - grid.distance.x) + count * grid.rowStep * (1 - .035 * Math.max(0, count - 1) / 5);
+    const x = (grid.columns?.[column] ?? grid.x0 + column * grid.step) + xShift;
+    const slope = grid.slope - (grid.rectangular ? .003 * count : 0);
+    const y = grid.distance.y + slope * (x - grid.distance.x) + count * grid.rowStep * (grid.rectangular ? 1 : 1 - .035 * Math.max(0, count - 1) / 5);
     let colored = 0;
     for (const dx of [-.13, .13]) for (const dy of [-.18, .18]) {
       const [r, g, b] = rgb(x + dx * grid.step, y + dy * grid.rowStep);
-      if ((r > g * 1.28 && r > b * 1.16) || (r < 105 && g < 135 && b > r * 1.2)) colored++;
+      if ((r > g * 1.28 && r > b * 1.16) || (r < 105 && g < 135 && b > r * 1.2) ||
+          (grid.rectangular && (r > b * 1.5 && g > b * 1.5 || Math.max(r, g, b) < 140))) colored++;
     }
     const inverse = colored >= 2;
+    const background = [-.25, .25].flatMap(dx => [-.28, .28].map(dy => {
+      const [r, g, b] = rgb(x + dx * grid.step, y + dy * grid.rowStep);
+      return (r + g + b) / 3;
+    })).sort((a, b) => a - b)[2];
     for (let iy = 0; iy < 43; iy++) for (let ix = 0; ix < 66; ix++) {
       const [r, g, b] = rgb(x + (ix - 33) * grid.step / 90, y + (iy - 21.5) * grid.rowStep / 82);
+      if (grid.rectangular) {
+        if (column < 19 && column !== 9 && Math.abs(ix - 33) >= 20) continue;
+        const contrast = inverse ? Math.min(r, g, b) - 70 : background - (r + g + b) / 3;
+        const value = Math.max(0, Math.min(255, 255 - Math.max(0, contrast - 12) * 4));
+        const p = ((PAD + row * CELL_H + 16 + iy) * width + PAD + column * CELL_W + 13 + ix) * 4;
+        data[p] = data[p + 1] = data[p + 2] = value;
+        continue;
+      }
       const ink = inverse ? Math.abs(ix - 33) < 16 && Math.min(r, g, b) > 148
-        : (r + g + b) / 3 < 153 && (column === 9 || column >= 19 || Math.abs(ix - 33) < 20);
+        : (r + g + b) / 3 < (grid.rectangular ? background - 28 : 153) &&
+          (column === 9 || column >= 19 || Math.abs(ix - 33) < 20);
       if (!ink) continue;
       const p = ((PAD + row * CELL_H + 16 + iy) * width + PAD + column * CELL_W + 13 + ix) * 4;
       data[p] = data[p + 1] = data[p + 2] = 0;
     }
   }
-  return { width, height, data };
+  return { width, height, data, rectangular: !!grid.rectangular };
 }
 
 export async function recognizeSimulatorDigits(worker, encode, atlas, onProgress) {
   const digits = [];
   let visited = 0;
   for (let row = 0; row < 7; row++) for (let column = 0; column < 21; column++) {
-    if ([9, 19].includes(column)) continue;
-    onProgress?.(++visited / (7 * 19));
+    if (!atlas.rectangular && [9, 19].includes(column)) continue;
+    onProgress?.(++visited / (7 * (atlas.rectangular ? 21 : 19)));
     const left = PAD + column * CELL_W, top = PAD + row * CELL_H;
     let minX = Infinity, maxX = -1, minY = Infinity, maxY = -1;
     for (let y = top + 16; y < top + 59; y++) {
-      for (let x = left + 13; x < left + 79; x++) if (!atlas.data[(y * atlas.width + x) * 4]) {
+      for (let x = left + 13; x < left + 79; x++) if (atlas.data[(y * atlas.width + x) * 4] < 180) {
         minX = Math.min(minX, x); maxX = Math.max(maxX, x);
         minY = Math.min(minY, y); maxY = Math.max(maxY, y);
       }
@@ -93,10 +139,10 @@ export async function recognizeSimulatorDigits(worker, encode, atlas, onProgress
     }
     const image = encode({ width, height, data });
     let text = "";
-    for (const mode of ["8", "10", "6"]) {
+    for (const mode of atlas.rectangular ? ["13", "7", "10", "8", "6"] : ["8", "10", "6"]) {
       const result = await worker.recognize(image, { tessedit_pageseg_mode: mode, tessedit_char_whitelist: "0123456789" });
       const value = result.data.text.trim();
-      if (column === 20 ? /^\d{2,3}$/.test(value) : row === 0 ? /^[3-6]$/.test(value) : /^\d{1,2}$/.test(value)) {
+      if (column === 20 || atlas.rectangular && [9, 19].includes(column) ? /^\d{2,3}$/.test(value) : row === 0 ? /^[3-6]$/.test(value) : /^\d{1,2}$/.test(value)) {
         text = value;
         break;
       }
@@ -122,6 +168,26 @@ export function readScrambleAtlas(digits, names) {
   const results = [];
   for (let first = 1; first <= 4; first += 3) {
     const group = cells.slice(first, first + 3);
+    for (const [start, end, totalColumn] of [[0, 8, 9], [10, 18, 19]]) {
+      const consensus = column => {
+        const counts = new Map();
+        for (const row of group) if (row.has(column)) counts.set(row.get(column), (counts.get(row.get(column)) ?? 0) + 1);
+        return [...counts].find(([, count]) => count >= 2)?.[0];
+      };
+      const subtotal = consensus(totalColumn);
+      if (!subtotal) continue;
+      const uncertain = [], confirmed = new Map();
+      for (let column = start; column <= end; column++) {
+        const value = consensus(column);
+        if (value >= 1 && value <= 12) confirmed.set(column, value);
+        else if (group.some(row => row.has(column))) uncertain.push(column);
+      }
+      if (uncertain.length !== 1) continue;
+      const missing = subtotal - [...confirmed.values()].reduce((a, b) => a + b, 0);
+      if (missing < 1 || missing > 12) continue;
+      confirmed.set(uncertain[0], missing);
+      for (const row of group) for (const [column, value] of confirmed) row.set(column, value);
+    }
     const players = names.slice(first - 1, first + 2).filter(Boolean);
     if (!players.length || !group.some(row => row.size)) continue;
     const grossCounts = new Map();
@@ -167,10 +233,28 @@ export function readScrambleAtlas(digits, names) {
   return results;
 }
 
-export async function recognizeSimulatorNames(worker, file, grid) {
+export async function recognizeSimulatorNames(worker, file, grid, image, encode) {
   const names = [];
   for (let row = 1; row <= 6; row++) {
-    const left = Math.max(0, Math.round(grid.distance.x - grid.step * 1.3));
+    if (grid.rectangular && image && encode) {
+      const left = Math.round(grid.nameX - grid.step * .18 + row * .9);
+      const top = Math.round(grid.distance.y + row * grid.rowStep - grid.rowStep * .3);
+      const cropWidth = Math.round(grid.x0 - left - grid.step * .6), cropHeight = Math.round(grid.rowStep * .58);
+      const width = cropWidth * 3 + 24, height = cropHeight * 3 + 24;
+      const data = new Uint8ClampedArray(width * height * 4).fill(255);
+      for (let y = 0; y < cropHeight * 3; y++) for (let x = 0; x < cropWidth * 3; x++) {
+        const p = ((top + Math.floor(y / 3)) * image.width + left + Math.floor(x / 3)) * 4;
+        const brightness = (image.data[p] + image.data[p + 1] + image.data[p + 2]) / 3;
+        const value = Math.max(0, Math.min(255, (brightness - 140) * 3));
+        const dest = ((y + 12) * width + x + 12) * 4;
+        data[dest] = data[dest + 1] = data[dest + 2] = value;
+      }
+      const result = await worker.recognize(encode({ width, height, data }),
+        { tessedit_pageseg_mode: "7", tessedit_char_whitelist: "" });
+      names.push(result.data.text.trim().replace(/[^\p{L}\p{M} '.-]/gu, "").trim());
+      continue;
+    }
+    const left = Math.max(0, Math.round((grid.nameX ?? grid.distance.x) - grid.step * 1.3));
     const rectangle = { left, top: Math.round(grid.distance.y + row * grid.rowStep - grid.rowStep * .48),
       width: Math.round(grid.x0 - left - grid.step), height: Math.round(grid.rowStep * .87) };
     const result = await worker.recognize(file, { rectangle, tessedit_pageseg_mode: "7", tessedit_char_whitelist: "" });

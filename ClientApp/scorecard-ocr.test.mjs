@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { learnScorecardAliases, matchScorecardTeam, readScorecard, resolveScorecardAlias } from "./src/scorecard-ocr.js";
-import { readScrambleAtlas } from "./src/simulator-ocr.js";
+import { readScrambleAtlas, simulatorGrid } from "./src/simulator-ocr.js";
 
 const teams = [
   { id: "a", members: { A: "Salva", B: "Javi Polanco", C: "Manuel Reyes" } },
@@ -122,4 +122,35 @@ test("simulator card separates two scramble groups and does not count skipped ho
   ]);
   const withoutTotals = digits.filter(word => word.bbox.x0 !== 1860 || word.bbox.y0 === 20);
   assert.ok(readScrambleAtlas(withoutTotals, names).every(result => result.score === "" && result.issue));
+});
+
+test("rectangular scorecard uses verified subtotals and leaves unplayed hole 17 empty", () => {
+  const rows = [
+    "4 4 3 4 5 4 4 3 5 36 4 3 5 4 3 4 5 4 4 36 72",
+    "- 8 2 3 4 - - 2 3 20 - 3 4 4 2 - 5 - 3 21 41",
+    "- - 2 3 4 - - 2 3 20 - 3 4 4 2 - 5 - 3 21 41",
+    "- 3 2 3 4 - - 2 3 20 - 3 4 4 2 - 5 - 3 21 41",
+    "- 4 2 4 5 - - 2 3 20 - 3 5 3 2 - 4 - 3 20 40",
+    "- 4 2 4 5 - - 2 3 20 - 3 5 3 2 - 4 - 3 20 40",
+    "- 4 2 4 5 - - - 3 20 - 3 5 3 2 - 4 - 3 20 40",
+  ];
+  const digits = rows.flatMap((line, row) => line.split(" ").flatMap((text, column) => text === "-" ? [] :
+    [{ text, bbox: { x0: 20 + column * 92, x1: 112 + column * 92, y0: 20 + row * 76, y1: 96 + row * 76 } }]));
+  const results = readScrambleAtlas(digits, ["Suriel", "Anibal", "Duba", "Dominic", "Edward", "Said"]);
+  assert.deepEqual(results.map(result => result.score), ["-7", "-8"]);
+  assert.deepEqual(results.map(result => result.holes), [{ 16: 0, 18: -1 }, { 16: -1, 18: -1 }]);
+  assert.ok(results.every(result => result.issue));
+  const withoutOut = digits.filter(word => word.bbox.x0 !== 20 + 9 * 92);
+  assert.equal(readScrambleAtlas(withoutOut, ["Suriel", "Anibal", "Duba"])[0].score, "");
+});
+
+test("rectangular grid can recover from an unreadable index row and merged hole labels", () => {
+  const word = (text, x, y) => ({ text, bbox: { x0: x - 4, x1: x + 4, y0: y - 5, y1: y + 5 } });
+  const words = [word("Hole", 143, 610), word("1", 303, 613), word("4", 303, 646), word("“Distance", 120, 708),
+    ...Array.from({ length: 21 }, (_, i) => word(i === 9 || i >= 19 ? "3600" : "450", 303 + i * 34, 714))];
+  const grid = simulatorGrid(words);
+  assert.equal(grid.rectangular, true);
+  assert.equal(grid.rowStep, 33);
+  assert.equal(grid.columns.length, 21);
+  assert.equal(simulatorGrid(words.slice(0, 6)), null);
 });

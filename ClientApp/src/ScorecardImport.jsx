@@ -18,7 +18,8 @@ async function readScramblePhoto(worker, file, grid, onProgress) {
     source.height = bitmap.height;
     const context = source.getContext("2d", { willReadFrequently: true });
     context.drawImage(bitmap, 0, 0);
-    const atlas = simulatorAtlas(context.getImageData(0, 0, source.width, source.height), grid);
+    const image = context.getImageData(0, 0, source.width, source.height);
+    const atlas = simulatorAtlas(image, grid);
     const glyph = document.createElement("canvas");
     const encode = ({ width, height, data }) => {
       glyph.width = width;
@@ -27,7 +28,7 @@ async function readScramblePhoto(worker, file, grid, onProgress) {
       return glyph.toDataURL("image/png");
     };
     const digits = await recognizeSimulatorDigits(worker, encode, atlas, onProgress);
-    const names = await recognizeSimulatorNames(worker, file, grid);
+    const names = await recognizeSimulatorNames(worker, file, grid, image, encode);
     return readScrambleAtlas(digits, names);
   } finally { bitmap.close(); }
 }
