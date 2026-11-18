@@ -176,3 +176,33 @@ test("focuses the wide scorecard header without the narrow surrounding HUD panel
   assert.ok(focused.height > 200);
   assert.ok(focused.data instanceof Uint8ClampedArray);
 });
+
+test("rectifies a slanted header with different left and right heights", () => {
+  const width = 640, height = 500;
+  const image = { width, height, data: new Uint8ClampedArray(width * height * 4).fill(0) };
+  for (let x = 60; x < 590; x++) for (let y = Math.round(70 + x * .08); y < 430; y++) {
+    const p = (y * width + x) * 4;
+    const blue = y < 220 + x * .02;
+    image.data.set(blue ? [65, 70, 170, 255] : [230, 230, 230, 255], p);
+  }
+  const focused = focusScorecardImage(image);
+  assert.notEqual(focused, image);
+  const edge = fraction => {
+    const x = Math.round(focused.width * fraction);
+    for (let y = 10; y < focused.height; y++) if (focused.data[(y * focused.width + x) * 4] > 200) return y;
+    return Infinity;
+  };
+  assert.ok(Number.isFinite(edge(.25)));
+  assert.ok(Math.abs(edge(.25) - edge(.75)) < 8);
+});
+
+test("preserves ten-stroke holes instead of dropping results above double bogey", () => {
+  const par = "4 4 3 4 5 4 4 3 5 36 4 3 5 4 3 4 5 4 4 36 72";
+  const strokes = "- 4 3 3 5 - - 3 4 22 - 10 10 10 10 - 10 - 10 60 82";
+  const digits = [par, strokes, strokes, strokes].flatMap((line, row) => line.split(" ").flatMap((text, column) => text === "-" ? [] :
+    [{ text, bbox: { x0: 20 + column * 92, x1: 112 + column * 92, y0: 20 + row * 76, y1: 96 + row * 76 } }]));
+  const [result] = readScrambleAtlas(digits, ["Tony", "Salva", "Arturo"]);
+  assert.equal(result.score, "+34");
+  assert.deepEqual(result.holes, { 16: 7, 17: 5, 18: 6 });
+  assert.equal(result.issue, "");
+});

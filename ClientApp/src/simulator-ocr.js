@@ -13,7 +13,7 @@ export function focusScorecardImage(image) {
     for (let x = 0; x < image.width; x += 2) {
       const p = (y * image.width + x) * 4;
       const [r, g, b] = image.data.subarray(p, p + 3);
-      if (b > 55 && b > r * 1.22 && b > g * 1.15) {
+      if (b > 55 && b > r * 1.35 && b > g * 1.3) {
         if (start < 0 || x - last > gap) start = x;
         last = x;
         if (!best || x - start > best.right - best.left) best = { left: start, right: x };
@@ -25,7 +25,7 @@ export function focusScorecardImage(image) {
         bands.push(band);
       }
       band.bottom = y;
-      band.rows.push(best);
+      band.rows.push({ ...best, y });
     }
   }
   const header = bands.filter(item => item.bottom - item.top > image.height * .015)
@@ -36,12 +36,56 @@ export function focusScorecardImage(image) {
   const right = Math.min(image.width, median(header.rows.map(row => row.right)) + 8);
   const top = Math.max(0, header.top - 4);
   const bottom = Math.min(image.height, header.bottom + (right - left) * .34);
+  const fit = (points, separation = (right - left) * .2) => {
+    const slopes = points.flatMap((a, i) => points.slice(i + 1)
+      .filter(b => Math.abs(b.x - a.x) > separation)
+      .map(b => (b.y - a.y) / (b.x - a.x)));
+    const slope = median(slopes.length ? slopes : [0]);
+    const intercept = median(points.map(p => p.y - slope * p.x));
+    return x => intercept + slope * x;
+  };
+  // Fit both edges of the header independently: camera tilt and perspective
+  // change the vertical scale across the card, not just its bounding box.
+  const tops = [], floors = [];
+  for (let x = Math.round(left + (right - left) * .08); x < right - (right - left) * .08; x += 12) {
+    let first;
+    for (let y = Math.max(0, Math.floor(header.top - (right - left) * .2)); y < header.bottom; y++) {
+      const p = (y * image.width + x) * 4;
+      const [r, g, b] = image.data.subarray(p, p + 3);
+      if (b > 55 && b > r * 1.35 && b > g * 1.3) {
+        if (first === undefined) first = y;
+      }
+    }
+    if (first !== undefined) tops.push({ x, y: first });
+    for (let y = Math.round(header.bottom - (right - left) * .12); y < Math.min(image.height - 5, header.bottom + (right - left) * .2); y++) {
+      let white = 0;
+      for (let dy = 0; dy < 5; dy++) for (let dx = -9; dx <= 9; dx += 3) {
+        const p = ((y + dy) * image.width + x + dx) * 4;
+        const [r, g, b] = image.data.subarray(p, p + 3);
+        if (Math.min(r, g, b) > 145 && Math.max(r, g, b) - Math.min(r, g, b) < 65) white++;
+      }
+      if (white >= 32) { floors.push({ x, y }); break; }
+    }
+  }
+  const upper = tops.length > 15 ? fit(tops) : null;
+  const lower = floors.length > 15 ? fit(floors) : null;
+  const middle = (left + right) / 2;
+  const headerHeight = upper && lower ? lower(middle) - upper(middle) : 0;
+  const rectify = headerHeight > (right - left) * .12 && headerHeight < (right - left) * .4;
+  const sideRows = header.rows.filter(row => row.right - row.left > (right - left) * .96);
+  const sideLeft = sideRows.length > 15 ? fit(sideRows.map(row => ({ x: row.y, y: row.left })), 30) : null;
+  const sideRight = sideRows.length > 15 ? fit(sideRows.map(row => ({ x: row.y, y: row.right })), 30) : null;
   if (right - left < image.width * .5 || bottom - top < 100) return image;
   const width = 1200, scale = (right - left) / width;
-  const height = Math.round((bottom - top) / scale);
+  const height = Math.round((rectify ? headerHeight + (right - left) * .3 : bottom - top) / scale);
   const data = new Uint8ClampedArray(width * height * 4).fill(255);
   for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
-    const sx = Math.min(image.width - 1, left + x * scale), sy = Math.min(image.height - 1, top + y * scale);
+    let sx = Math.min(image.width - 1, left + x * scale);
+    const sy = Math.max(0, Math.min(image.height - 1, rectify
+      ? upper(sx) - 4 + y * scale * (lower(sx) - upper(sx)) / headerHeight
+      : top + y * scale));
+    if (rectify && sideLeft && sideRight) sx = Math.max(0, Math.min(image.width - 1,
+      sideLeft(sy) - 4 + (sideRight(sy) - sideLeft(sy) + 8) * x / width));
     const x0 = Math.floor(sx), y0 = Math.floor(sy), dx = sx - x0, dy = sy - y0;
     const x1 = Math.min(image.width - 1, x0 + 1), y1 = Math.min(image.height - 1, y0 + 1);
     const p = (y * width + x) * 4;
@@ -54,8 +98,9 @@ export function focusScorecardImage(image) {
   return { width, height, data };
 }
 
-export function simulatorGrid(words) {
+export function simulatorGrid(words, rectangular = false) {
   const points = words.map(center);
+  if (rectangular) return rectangularGrid(points);
   const index = points.find(point => /^(INDEX|[I1L]NDEX)$/i.test(point.text));
   const distance = points.find(point => /^DISTANCE$/i.test(point.text) && point.y > index?.y && Math.abs(point.x - index.x) < 65);
   if (!distance) return rectangularGrid(points);
@@ -113,7 +158,9 @@ function rectangularGrid(points) {
   const holeOne = points.find(point => point.text === "1" && Math.abs(point.x - first.x) < step * .3 &&
     Math.abs(point.y - header.y) < 20);
   const parOne = points.find(point => /^[3-6]$/.test(point.text) && Math.abs(point.x - first.x) < step * .3 &&
-    point.y > (holeOne?.y ?? header.y) + step * .45 && point.y < (holeOne?.y ?? header.y) + step * 1.3);
+    point.y > (holeOne?.y ?? header.y) + step * .45 && point.y < (holeOne?.y ?? header.y) + step * 1.3)
+    || (points.some(point => /^Par$/i.test(point.text) && point.y > header.y && point.y < label.y)
+      ? { x: first.x, y: (holeOne?.y ?? header.y) + (first.y - (holeOne?.y ?? header.y)) / 3 } : null);
   if (!parOne) return null;
   const rowStep = holeOne ? parOne.y - holeOne.y : (first.y - parOne.y) / 2;
   const parPoints = points.filter(point => /^[3-6]$/.test(point.text) && point.x >= first.x - step * .3 &&
@@ -121,7 +168,15 @@ function rectangularGrid(points) {
   const slopes = parPoints.flatMap((a, i) => parPoints.slice(i + 1).filter(b => b.x - a.x > step * 5)
     .map(b => (b.y - a.y) / (b.x - a.x))).sort((a, b) => a - b);
   const slope = slopes[Math.floor(slopes.length / 2)] ?? 0;
+  const parCells = slots.map(x => points.filter(p => /^\d{1,3}$/.test(p.text) &&
+    Math.abs(p.x - x) < step * .35 && Math.abs(p.y - parOne.y - slope * (x - first.x)) < rowStep * .35)
+    .sort((a, b) => Math.abs(a.x - x) - Math.abs(b.x - x))[0]);
+  const parValues = parCells.map(p => p ? Number(p.text) : null);
+  const validPars = parValues.filter((_, i) => ![9, 19, 20].includes(i));
+  const verifiedPars = validPars.every(p => p >= 3 && p <= 6) &&
+    validPars.reduce((a, b) => a + b, 0) === parValues[20] ? parValues : null;
   return { rectangular: true, step, rowStep, x0: first.x, slope,
+    verifiedPars,
     rowSlope: slope > .004 ? .003 : 0, left: 2, right: -2,
     nameX: header.x, columns: slots, distance: { x: first.x, y: parOne.y + 2 * rowStep } };
 }
@@ -177,7 +232,7 @@ export function simulatorAtlas(image, grid) {
   };
   for (let row = 0; row < 7; row++) for (let column = 0; column < 21; column++) {
     const count = row === 0 ? -2 : row;
-    const xShift = (grid.left + (grid.right - grid.left) * column / 20) * (3 + count) / 3;
+    const xShift = grid.rectangular ? 0 : (grid.left + (grid.right - grid.left) * column / 20) * (3 + count) / 3;
     const x = (grid.columns?.[column] ?? grid.x0 + column * grid.step) + xShift;
     const slope = grid.slope - (grid.rectangular ? grid.rowSlope * count : 0);
     let y = grid.distance.y + slope * (x - grid.distance.x) + count * grid.rowStep * (grid.rectangular ? 1 : 1 - .035 * Math.max(0, count - 1) / 5);
@@ -202,7 +257,8 @@ export function simulatorAtlas(image, grid) {
     for (let iy = 0; iy < 43; iy++) for (let ix = 0; ix < 66; ix++) {
       const [r, g, b] = rgb(x + (ix - 33) * grid.step / 90, y + (iy - 21.5) * grid.rowStep / 82);
       if (grid.rectangular) {
-        if (column < 19 && column !== 9 && Math.abs(ix - 33) >= 20) continue;
+        const localStep = grid.columns ? column < 20 ? grid.columns[column + 1] - grid.columns[column] : grid.columns[20] - grid.columns[19] : grid.step;
+        if (Math.abs(ix - 33) * grid.step / 90 >= localStep * .34) continue;
         const contrast = inverse ? Math.min(r, g, b) - inverseBackground : background - (r + g + b) / 3;
         const value = Math.max(0, Math.min(255, 255 - Math.max(0, contrast - 12) * 2));
         const p = ((PAD + row * CELL_H + 16 + iy) * width + PAD + column * CELL_W + 13 + ix) * 4;
@@ -217,7 +273,7 @@ export function simulatorAtlas(image, grid) {
       data[p] = data[p + 1] = data[p + 2] = 0;
     }
   }
-  return { width, height, data, rectangular: !!grid.rectangular };
+  return { width, height, data, rectangular: !!grid.rectangular, verifiedPars: grid.verifiedPars };
 }
 
 export async function recognizeSimulatorDigits(worker, encode, atlas, onProgress) {
@@ -227,6 +283,10 @@ export async function recognizeSimulatorDigits(worker, encode, atlas, onProgress
     if (!atlas.rectangular && [9, 19].includes(column)) continue;
     onProgress?.(++visited / (7 * (atlas.rectangular ? 21 : 19)));
     const left = PAD + column * CELL_W, top = PAD + row * CELL_H;
+    if (row === 0 && atlas.verifiedPars) {
+      digits.push({ text: String(atlas.verifiedPars[column]), bbox: { x0: left, y0: top, x1: left + CELL_W, y1: top + CELL_H } });
+      continue;
+    }
     let minX = Infinity, maxX = -1, minY = Infinity, maxY = -1;
     for (let y = top + 16; y < top + 59; y++) {
       for (let x = left + 13; x < left + 79; x++) if (atlas.data[(y * atlas.width + x) * 4] < 180) {
@@ -251,6 +311,16 @@ export async function recognizeSimulatorDigits(worker, encode, atlas, onProgress
         text = value;
         break;
       }
+    }
+    if (!text && atlas.rectangular) {
+      const repeated = new Uint8ClampedArray(width * 3 * height * 4).fill(255);
+      for (let copy = 0; copy < 3; copy++) for (let y = 0; y < height; y++)
+        repeated.set(data.subarray(y * width * 4, (y + 1) * width * 4), (y * width * 3 + copy * width) * 4);
+      const result = await worker.recognize(encode({ width: width * 3, height, data: repeated }),
+        { tessedit_pageseg_mode: "13", tessedit_char_whitelist: "0123456789" });
+      const value = result.data.text.replace(/\s/g, "");
+      const match = /^(\d{1,3})\1\1$/.exec(value);
+      if (match && (row !== 0 || column === 20 || [9, 19].includes(column) || /^[3-6]$/.test(match[1]))) text = match[1];
     }
     if (/^\d{1,3}$/.test(text)) digits.push({ text, bbox: { x0: left, y0: top, x1: left + CELL_W, y1: top + CELL_H } });
   }
@@ -332,7 +402,7 @@ export function readScrambleAtlas(digits, names) {
     }
     const { playedPar, last } = outcomes.values().next().value;
     const relative = gross - playedPar;
-    const holes = Object.fromEntries(Object.entries(last).filter(([, delta]) => delta >= -3 && delta <= 2));
+    const holes = Object.fromEntries(Object.entries(last).filter(([, delta]) => delta >= -3 && delta <= 9));
     results.push({ names: players, score: relative === 0 ? "E" : relative > 0 ? `+${relative}` : String(relative), holes,
       issue: Object.keys(holes).length !== 3 ? "Revisa los últimos tres hoyos jugados." : "" });
   }
@@ -343,7 +413,7 @@ export async function recognizeSimulatorNames(worker, file, grid, image, encode)
   const names = [];
   for (let row = 1; row <= 6; row++) {
     if (grid.rectangular && image && encode) {
-      const left = Math.round(grid.nameX - grid.step * .18 + row * .9);
+      const left = Math.max(0, Math.round(grid.nameX - grid.step * .65));
       const rowY = grid.rowGeometry ? (grid.rowGeometry.left[row - 1] + grid.rowGeometry.left[row]) / 2 :
         grid.distance.y + row * grid.rowStep;
       const top = Math.round(rowY - grid.rowStep * .3);
@@ -356,6 +426,15 @@ export async function recognizeSimulatorNames(worker, file, grid, image, encode)
         const value = Math.max(0, Math.min(255, (brightness - 140) * 3));
         const dest = ((y + 12) * width + x + 12) * 4;
         data[dest] = data[dest + 1] = data[dest + 2] = value;
+      }
+      // Remove the vertical table rule without shaving the first name letter.
+      for (let x = 12; x < Math.min(width - 12, 42); x++) {
+        let dark = 0;
+        for (let y = 12; y < height - 12; y++) if (data[(y * width + x) * 4] < 100) dark++;
+        if (dark / (height - 24) > .8) for (let y = 12; y < height - 12; y++) {
+          const p = (y * width + x) * 4;
+          data[p] = data[p + 1] = data[p + 2] = 255;
+        }
       }
       const result = await worker.recognize(encode({ width, height, data }),
         { tessedit_pageseg_mode: "7", tessedit_char_whitelist: "" });

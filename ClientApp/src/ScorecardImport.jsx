@@ -4,7 +4,7 @@ import { learnScorecardAliases, matchScorecardTeam, readScorecard, readSimulator
 import { focusScorecardImage, refineScorecardGrid, readScrambleAtlas, recognizeSimulatorDigits, recognizeSimulatorNames, simulatorAtlas, simulatorGrid } from "./simulator-ocr";
 import { bindPhotoImportEvents } from "./photo-import-events";
 
-const holeOptions = [[2, "D. Bogey (+2)"], [1, "Bogey (+1)"], [0, "Par (E)"], [-1, "Birdie (-1)"], [-2, "Eagle (-2)"], [-3, "Albatross (-3)"]];
+const holeOptions = [...Array.from({ length: 7 }, (_, i) => [9 - i, `+${9 - i}`]), [2, "D. Bogey (+2)"], [1, "Bogey (+1)"], [0, "Par (E)"], [-1, "Birdie (-1)"], [-2, "Eagle (-2)"], [-3, "Albatross (-3)"]];
 const holes = [16, 17, 18];
 const holeLabels = { 16: "Hoyo 16", 17: "Hoyo 17", 18: "Hoyo 18" };
 const accepted = /\.(jpe?g|png|webp|bmp)$/i;
@@ -169,7 +169,7 @@ export default function ScorecardImport({ mobileCameraSlot }) {
             if (focused !== file) {
               const focusedDense = (await worker.recognize(focused, { tessedit_pageseg_mode: "6" }, ocrOptions)).data;
               const focusedSparse = (await worker.recognize(focused, { tessedit_pageseg_mode: "11" }, ocrOptions)).data;
-              const detected = simulatorGrid(readWords(focusedDense)) || simulatorGrid(readWords(focusedSparse));
+              const detected = simulatorGrid(readWords(focusedDense), true) || simulatorGrid(readWords(focusedSparse), true);
               if (detected) {
                 photo = focused;
                 dense = focusedDense;

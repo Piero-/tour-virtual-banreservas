@@ -259,7 +259,7 @@ function normalizeScores(savedScores) {
 function normalizeHoleScores(saved) {
   return Object.fromEntries(defaultTeams.filter(team => saved?.[team.id]).map(team => [team.id,
     Object.fromEntries([18, 17, 16].map(hole => [hole,
-      [2, 1, 0, -1, -2, -3].includes(saved[team.id][hole]) ? saved[team.id][hole] : 0])),
+      Number.isInteger(saved[team.id][hole]) && saved[team.id][hole] >= -3 && saved[team.id][hole] <= 9 ? saved[team.id][hole] : 0])),
   ]));
 }
 
@@ -1249,6 +1249,7 @@ function createPoolScoreControl(week, teamId) {
 }
 
 const HOLE_OPTIONS = [
+  ...Array.from({ length: 7 }, (_, i) => ({ value: 9 - i, label: `+${9 - i}` })),
   { value: 2, label: "D. Bogey (+2)" }, { value: 1, label: "Bogey (+1)" },
   { value: 0, label: "Par (E)" }, { value: -1, label: "Birdie (-1)" },
   { value: -2, label: "Eagle (-2)" }, { value: -3, label: "Albatross (-3)" },

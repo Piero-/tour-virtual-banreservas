@@ -129,7 +129,7 @@ const numericRow = line => line.match(/(?:^|[\s|:;,])([+-]?\d+)(?=$|[\s|:;,])/g)
 const starts = (line, labels) => new RegExp(`^(?:${labels})(?=\\s|:|\\||$)`, "i").exec(line);
 // Keys retain the existing tiebreak contract: 18 = last played, 16 = third-last.
 const closingScores = played => Object.fromEntries(played.slice(-3).map((delta, i, last) => [19 - last.length + i, delta]));
-const allowedDelta = delta => Number.isInteger(delta) && delta >= -3 && delta <= 2;
+const allowedDelta = delta => Number.isInteger(delta) && delta >= -3 && delta <= 9;
 
 // A simulator card can show several players sharing the same scramble score.
 export function readSimulatorCard(words) {
