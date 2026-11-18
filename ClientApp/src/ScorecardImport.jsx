@@ -5,7 +5,7 @@ import { readScrambleAtlas, recognizeSimulatorDigits, recognizeSimulatorNames, s
 
 const holeOptions = [[2, "D. Bogey (+2)"], [1, "Bogey (+1)"], [0, "Par (E)"], [-1, "Birdie (-1)"], [-2, "Eagle (-2)"], [-3, "Albatross (-3)"]];
 const holes = [16, 17, 18];
-const holeLabels = { 16: "Antepenúltimo", 17: "Penúltimo", 18: "Último" };
+const holeLabels = { 16: "Hoyo 16", 17: "Hoyo 17", 18: "Hoyo 18" };
 const accepted = /\.(jpe?g|png|webp|bmp)$/i;
 const acceptedMime = /^image\/(jpeg|png|webp|bmp|x-ms-bmp)$/i;
 
