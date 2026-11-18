@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { learnScorecardAliases, matchScorecardTeam, readScorecard, resolveScorecardAlias } from "./src/scorecard-ocr.js";
-import { readScrambleAtlas, simulatorGrid } from "./src/simulator-ocr.js";
+import { focusScorecardImage, readScrambleAtlas, simulatorGrid } from "./src/simulator-ocr.js";
 
 const teams = [
   { id: "a", members: { A: "Salva", B: "Javi Polanco", C: "Manuel Reyes" } },
@@ -156,4 +156,23 @@ test("rectangular grid can recover from an unreadable index row and merged hole 
   assert.equal(grid.rowStep, 33);
   assert.equal(grid.columns.length, 21);
   assert.equal(simulatorGrid(words.slice(0, 6)), null);
+});
+
+test("focuses the wide scorecard header without the narrow surrounding HUD panels", () => {
+  const width = 600, height = 500;
+  const image = { width, height, data: new Uint8ClampedArray(width * height * 4).fill(255) };
+  assert.equal(focusScorecardImage(image), image);
+  const blue = (left, right, top, bottom) => {
+    for (let y = top; y < bottom; y++) for (let x = left; x < right; x++) {
+      const p = (y * width + x) * 4;
+      image.data[p] = 65; image.data[p + 1] = 70; image.data[p + 2] = 170;
+    }
+  };
+  blue(0, 80, 0, 450);
+  blue(100, 560, 90, 200);
+  const focused = focusScorecardImage(image);
+  assert.equal(focused.width, 1200);
+  assert.ok(focused.height < height * 2);
+  assert.ok(focused.height > 200);
+  assert.ok(focused.data instanceof Uint8ClampedArray);
 });

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { learnScorecardAliases, matchScorecardTeam, readScorecard, readSimulatorCard } from "./scorecard-ocr";
-import { readScrambleAtlas, recognizeSimulatorDigits, recognizeSimulatorNames, simulatorAtlas, simulatorGrid } from "./simulator-ocr";
+import { focusScorecardImage, refineScorecardGrid, readScrambleAtlas, recognizeSimulatorDigits, recognizeSimulatorNames, simulatorAtlas, simulatorGrid } from "./simulator-ocr";
 import { bindPhotoImportEvents } from "./photo-import-events";
 
 const holeOptions = [[2, "D. Bogey (+2)"], [1, "Bogey (+1)"], [0, "Par (E)"], [-1, "Birdie (-1)"], [-2, "Eagle (-2)"], [-3, "Albatross (-3)"]];
@@ -12,6 +12,24 @@ const acceptedMime = /^image\/(jpeg|png|webp|bmp|x-ms-bmp)$/i;
 
 const readWords = data => (data.blocks || []).flatMap(block => block.paragraphs.flatMap(paragraph => paragraph.lines.flatMap(line => line.words)));
 
+async function focusPhoto(file) {
+  const bitmap = await createImageBitmap(file);
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    context.drawImage(bitmap, 0, 0);
+    const image = context.getImageData(0, 0, bitmap.width, bitmap.height);
+    const focused = focusScorecardImage(image);
+    if (focused === image) return file;
+    canvas.width = focused.width;
+    canvas.height = focused.height;
+    context.putImageData(new ImageData(focused.data, focused.width, focused.height), 0, 0);
+    return await new Promise(resolve => canvas.toBlob(blob => resolve(blob || file), "image/png"));
+  } finally { bitmap.close(); }
+}
+
 async function readScramblePhoto(worker, file, grid, onProgress) {
   const bitmap = await createImageBitmap(file);
   try {
@@ -21,6 +39,7 @@ async function readScramblePhoto(worker, file, grid, onProgress) {
     const context = source.getContext("2d", { willReadFrequently: true });
     context.drawImage(bitmap, 0, 0);
     const image = context.getImageData(0, 0, source.width, source.height);
+    grid = refineScorecardGrid(image, grid);
     const atlas = simulatorAtlas(image, grid);
     const glyph = document.createElement("canvas");
     const encode = ({ width, height, data }) => {
@@ -136,18 +155,37 @@ export default function ScorecardImport({ mobileCameraSlot }) {
         const id = ++nextId.current;
         try {
           const ocrOptions = { blocks: true, text: true };
-          const { data } = await worker.recognize(file, { tessedit_pageseg_mode: "11", tessedit_char_whitelist: "" }, ocrOptions);
+          let { data } = await worker.recognize(file, { tessedit_pageseg_mode: "11", tessedit_char_whitelist: "" }, ocrOptions);
           setProgress(20);
-          const raw = extractRows(data);
-          const dense = (await worker.recognize(file, { tessedit_pageseg_mode: "6" }, ocrOptions)).data;
+          let raw = extractRows(data);
+          let dense = (await worker.recognize(file, { tessedit_pageseg_mode: "6" }, ocrOptions)).data;
           setProgress(40);
-          const sparseWords = readWords(data), denseWords = readWords(dense);
-          const grid = simulatorGrid(denseWords) || simulatorGrid(sparseWords);
+          let sparseWords = readWords(data), denseWords = readWords(dense);
+          let grid = simulatorGrid(denseWords) || simulatorGrid(sparseWords);
+          let photo = file;
+          if (!grid || grid.rectangular) {
+            setStatus(`Enfocando la tarjeta de la foto ${index + 1}…`);
+            const focused = await focusPhoto(file);
+            if (focused !== file) {
+              const focusedDense = (await worker.recognize(focused, { tessedit_pageseg_mode: "6" }, ocrOptions)).data;
+              const focusedSparse = (await worker.recognize(focused, { tessedit_pageseg_mode: "11" }, ocrOptions)).data;
+              const detected = simulatorGrid(readWords(focusedDense)) || simulatorGrid(readWords(focusedSparse));
+              if (detected) {
+                photo = focused;
+                dense = focusedDense;
+                data = focusedSparse;
+                raw = extractRows(data);
+                denseWords = readWords(dense);
+                sparseWords = readWords(data);
+                grid = detected;
+              }
+            }
+          }
           let simulator = readSimulatorCard(denseWords);
           if (!simulator.length) simulator = readSimulatorCard(sparseWords);
           if (grid) {
             setStatus(`Verificando los hoyos de la foto ${index + 1}…`);
-            const scramble = await readScramblePhoto(worker, file, grid, fraction => setProgress(40 + Math.floor(fraction * 54)));
+            const scramble = await readScramblePhoto(worker, photo, grid, fraction => setProgress(40 + Math.floor(fraction * 54)));
             if (scramble.length && (scramble.some(card => card.score) || !simulator.length)) simulator = scramble;
           }
           if (simulator.length) {

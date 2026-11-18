@@ -3,6 +3,57 @@ const center = word => ({
   y: (word.bbox.y0 + word.bbox.y1) / 2,
 });
 
+export function focusScorecardImage(image) {
+  const bands = [];
+  let band;
+  // The simulator's wide blue header is distinct from the narrow HUD panels.
+  for (let y = 0; y < image.height; y += 2) {
+    let start = -1, last = -1, best = null;
+    const gap = Math.max(8, image.width * .025);
+    for (let x = 0; x < image.width; x += 2) {
+      const p = (y * image.width + x) * 4;
+      const [r, g, b] = image.data.subarray(p, p + 3);
+      if (b > 55 && b > r * 1.22 && b > g * 1.15) {
+        if (start < 0 || x - last > gap) start = x;
+        last = x;
+        if (!best || x - start > best.right - best.left) best = { left: start, right: x };
+      }
+    }
+    if (best && best.right - best.left > image.width * .5) {
+      if (!band || y - band.bottom > 6) {
+        band = { top: y, bottom: y, rows: [] };
+        bands.push(band);
+      }
+      band.bottom = y;
+      band.rows.push(best);
+    }
+  }
+  const header = bands.filter(item => item.bottom - item.top > image.height * .015)
+    .sort((a, b) => b.rows.length - a.rows.length)[0];
+  if (!header) return image;
+  const median = values => values.sort((a, b) => a - b)[Math.floor(values.length / 2)];
+  const left = Math.max(0, median(header.rows.map(row => row.left)) - 6);
+  const right = Math.min(image.width, median(header.rows.map(row => row.right)) + 8);
+  const top = Math.max(0, header.top - 4);
+  const bottom = Math.min(image.height, header.bottom + (right - left) * .34);
+  if (right - left < image.width * .5 || bottom - top < 100) return image;
+  const width = 1200, scale = (right - left) / width;
+  const height = Math.round((bottom - top) / scale);
+  const data = new Uint8ClampedArray(width * height * 4).fill(255);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const sx = Math.min(image.width - 1, left + x * scale), sy = Math.min(image.height - 1, top + y * scale);
+    const x0 = Math.floor(sx), y0 = Math.floor(sy), dx = sx - x0, dy = sy - y0;
+    const x1 = Math.min(image.width - 1, x0 + 1), y1 = Math.min(image.height - 1, y0 + 1);
+    const p = (y * width + x) * 4;
+    for (let c = 0; c < 3; c++) data[p + c] =
+      image.data[(y0 * image.width + x0) * 4 + c] * (1 - dx) * (1 - dy) +
+      image.data[(y0 * image.width + x1) * 4 + c] * dx * (1 - dy) +
+      image.data[(y1 * image.width + x0) * 4 + c] * (1 - dx) * dy +
+      image.data[(y1 * image.width + x1) * 4 + c] * dx * dy;
+  }
+  return { width, height, data };
+}
+
 export function simulatorGrid(words) {
   const points = words.map(center);
   const index = points.find(point => /^(INDEX|[I1L]NDEX)$/i.test(point.text));
@@ -42,7 +93,7 @@ function rectangularGrid(points) {
   const label = points.find(point => /Distance$/i.test(point.text));
   const header = points.find(point => /^Hole$/i.test(point.text) && point.y < label?.y && label.y - point.y < 160);
   if (!label || !header) return null;
-  const distances = points.filter(point => /^\d{3,4}$/.test(point.text) && point.x > header.x + 90 &&
+  const distances = points.filter(point => /^[\dSs][\dSsaABBOIl]{2,3}$/.test(point.text) && point.x > header.x + 90 &&
     Math.abs(point.y - label.y) < 16).sort((a, b) => a.x - b.x);
   if (distances.length < 16) return null;
   const first = distances[0], second = distances[1];
@@ -62,16 +113,60 @@ function rectangularGrid(points) {
   const holeOne = points.find(point => point.text === "1" && Math.abs(point.x - first.x) < step * .3 &&
     Math.abs(point.y - header.y) < 20);
   const parOne = points.find(point => /^[3-6]$/.test(point.text) && Math.abs(point.x - first.x) < step * .3 &&
-    point.y > (holeOne?.y ?? header.y) + 20 && point.y < (holeOne?.y ?? header.y) + 45);
-  if (!holeOne || !parOne) return null;
-  const rowStep = parOne.y - holeOne.y;
-  return { rectangular: true, step, rowStep, x0: first.x, slope: .008, left: 2, right: -2,
-    nameX: header.x, columns: slots, distance: { x: first.x, y: holeOne.y + 3 * rowStep } };
+    point.y > (holeOne?.y ?? header.y) + step * .45 && point.y < (holeOne?.y ?? header.y) + step * 1.3);
+  if (!parOne) return null;
+  const rowStep = holeOne ? parOne.y - holeOne.y : (first.y - parOne.y) / 2;
+  const parPoints = points.filter(point => /^[3-6]$/.test(point.text) && point.x >= first.x - step * .3 &&
+    point.x <= slots[18] + step * .3 && Math.abs(point.y - parOne.y) < rowStep * .35);
+  const slopes = parPoints.flatMap((a, i) => parPoints.slice(i + 1).filter(b => b.x - a.x > step * 5)
+    .map(b => (b.y - a.y) / (b.x - a.x))).sort((a, b) => a - b);
+  const slope = slopes[Math.floor(slopes.length / 2)] ?? 0;
+  return { rectangular: true, step, rowStep, x0: first.x, slope,
+    rowSlope: slope > .004 ? .003 : 0, left: 2, right: -2,
+    nameX: header.x, columns: slots, distance: { x: first.x, y: parOne.y + 2 * rowStep } };
 }
 
 const CELL_W = 92, CELL_H = 76, PAD = 20;
 export function lastPlayedScores(played) {
   return Object.fromEntries(played.slice(-3).map(([, delta], index, last) => [19 - last.length + index, delta]));
+}
+export function refineScorecardGrid(image, grid) {
+  if (!grid.rectangular) return grid;
+  const brightness = (x, y) => {
+    let sum = 0;
+    for (let dx = -4; dx <= 4; dx++) {
+      const p = (Math.round(y) * image.width + Math.max(0, Math.min(image.width - 1, Math.round(x) + dx))) * 4;
+      sum += (image.data[p] + image.data[p + 1] + image.data[p + 2]) / 3;
+    }
+    return sum / 9;
+  };
+  const leftX = grid.x0 - grid.step * .7;
+  const rightX = grid.columns[20] + grid.step * .27;
+  const boundaries = x => {
+    let start;
+    for (let y = Math.round(grid.distance.y + grid.rowStep * .3); y < grid.distance.y + grid.rowStep; y++) {
+      if (brightness(x, y) > 185 && brightness(x, y + 3) > 185) { start = y; break; }
+    }
+    if (start === undefined) return null;
+    const edges = [start];
+    let step = grid.rowStep;
+    for (let i = 1; i <= 6; i++) {
+      const expected = edges.at(-1) + step;
+      const candidates = [];
+      for (let y = Math.round(expected - step * .22); y <= expected + step * .22 && y < image.height - 4; y++) {
+        const contrast = (brightness(x, y - 3) + brightness(x, y + 3)) / 2 - brightness(x, y);
+        if (contrast > 24) candidates.push({ y, contrast });
+      }
+      const best = candidates.sort((a, b) => b.contrast - a.contrast)[0];
+      if (!best) return null;
+      edges.push(best.y);
+      step = (edges.at(-1) - start) / i;
+    }
+    return edges;
+  };
+  const left = boundaries(leftX), right = boundaries(rightX);
+  if (!left || !right) return grid;
+  return { ...grid, rowGeometry: { leftX, rightX, left, right } };
 }
 export function simulatorAtlas(image, grid) {
   const width = PAD * 2 + CELL_W * 21, height = PAD * 2 + CELL_H * 7;
@@ -84,25 +179,32 @@ export function simulatorAtlas(image, grid) {
     const count = row === 0 ? -2 : row;
     const xShift = (grid.left + (grid.right - grid.left) * column / 20) * (3 + count) / 3;
     const x = (grid.columns?.[column] ?? grid.x0 + column * grid.step) + xShift;
-    const slope = grid.slope - (grid.rectangular ? .003 * count : 0);
-    const y = grid.distance.y + slope * (x - grid.distance.x) + count * grid.rowStep * (grid.rectangular ? 1 : 1 - .035 * Math.max(0, count - 1) / 5);
+    const slope = grid.slope - (grid.rectangular ? grid.rowSlope * count : 0);
+    let y = grid.distance.y + slope * (x - grid.distance.x) + count * grid.rowStep * (grid.rectangular ? 1 : 1 - .035 * Math.max(0, count - 1) / 5);
+    if (row > 0 && grid.rowGeometry) {
+      const { leftX, rightX, left, right } = grid.rowGeometry;
+      const l = (left[row - 1] + left[row]) / 2, r = (right[row - 1] + right[row]) / 2;
+      y = l + (r - l) * (x - leftX) / (rightX - leftX);
+    }
     let colored = 0;
     for (const dx of [-.13, .13]) for (const dy of [-.18, .18]) {
       const [r, g, b] = rgb(x + dx * grid.step, y + dy * grid.rowStep);
       if ((r > g * 1.28 && r > b * 1.16) || (r < 105 && g < 135 && b > r * 1.2) ||
-          (grid.rectangular && (r > b * 1.5 && g > b * 1.5 || Math.max(r, g, b) < 140))) colored++;
+          (grid.rectangular && (r > b * 1.5 && g > b * 1.5 || b > Math.max(r, g) * 1.15 || Math.max(r, g, b) < 140))) colored++;
     }
     const inverse = colored >= 2;
     const background = [-.25, .25].flatMap(dx => [-.28, .28].map(dy => {
       const [r, g, b] = rgb(x + dx * grid.step, y + dy * grid.rowStep);
       return (r + g + b) / 3;
     })).sort((a, b) => a - b)[2];
+    const inverseBackground = [-.25, .25].flatMap(dx => [-.28, .28].map(dy =>
+      Math.min(...rgb(x + dx * grid.step, y + dy * grid.rowStep)))).sort((a, b) => a - b)[1];
     for (let iy = 0; iy < 43; iy++) for (let ix = 0; ix < 66; ix++) {
       const [r, g, b] = rgb(x + (ix - 33) * grid.step / 90, y + (iy - 21.5) * grid.rowStep / 82);
       if (grid.rectangular) {
         if (column < 19 && column !== 9 && Math.abs(ix - 33) >= 20) continue;
-        const contrast = inverse ? Math.min(r, g, b) - 70 : background - (r + g + b) / 3;
-        const value = Math.max(0, Math.min(255, 255 - Math.max(0, contrast - 12) * 4));
+        const contrast = inverse ? Math.min(r, g, b) - inverseBackground : background - (r + g + b) / 3;
+        const value = Math.max(0, Math.min(255, 255 - Math.max(0, contrast - 12) * 2));
         const p = ((PAD + row * CELL_H + 16 + iy) * width + PAD + column * CELL_W + 13 + ix) * 4;
         data[p] = data[p + 1] = data[p + 2] = value;
         continue;
@@ -242,7 +344,9 @@ export async function recognizeSimulatorNames(worker, file, grid, image, encode)
   for (let row = 1; row <= 6; row++) {
     if (grid.rectangular && image && encode) {
       const left = Math.round(grid.nameX - grid.step * .18 + row * .9);
-      const top = Math.round(grid.distance.y + row * grid.rowStep - grid.rowStep * .3);
+      const rowY = grid.rowGeometry ? (grid.rowGeometry.left[row - 1] + grid.rowGeometry.left[row]) / 2 :
+        grid.distance.y + row * grid.rowStep;
+      const top = Math.round(rowY - grid.rowStep * .3);
       const cropWidth = Math.round(grid.x0 - left - grid.step * .6), cropHeight = Math.round(grid.rowStep * .58);
       const width = cropWidth * 3 + 24, height = cropHeight * 3 + 24;
       const data = new Uint8ClampedArray(width * height * 4).fill(255);
