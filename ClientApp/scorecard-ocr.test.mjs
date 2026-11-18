@@ -97,6 +97,9 @@ test("requires complete par for gross scores and rejects conflicting totals", ()
   assert.equal(partial.score, "-3");
   assert.deepEqual(partial.holes, { 16: -1, 17: 0, 18: 1 });
   assert.deepEqual(readScorecard("Score final: -3").holes, {});
+  const skipped = readScorecard("Hoyos: 14 16 18\nPar: 3 5 4\nGolpes: 2 5 3\nScore final: -7");
+  assert.deepEqual(skipped.holes, {16: -1, 17: 0, 18: -1});
+  assert.equal(skipped.issue, "");
 });
 
 test("simulator card separates two scramble groups and does not count skipped holes", () => {
@@ -124,7 +127,7 @@ test("simulator card separates two scramble groups and does not count skipped ho
   assert.ok(readScrambleAtlas(withoutTotals, names).every(result => result.score === "" && result.issue));
 });
 
-test("rectangular scorecard uses verified subtotals and leaves unplayed hole 17 empty", () => {
+test("rectangular scorecard uses the last three played holes, skipping empty hole 17", () => {
   const rows = [
     "4 4 3 4 5 4 4 3 5 36 4 3 5 4 3 4 5 4 4 36 72",
     "- 8 2 3 4 - - 2 3 20 - 3 4 4 2 - 5 - 3 21 41",
@@ -138,8 +141,8 @@ test("rectangular scorecard uses verified subtotals and leaves unplayed hole 17 
     [{ text, bbox: { x0: 20 + column * 92, x1: 112 + column * 92, y0: 20 + row * 76, y1: 96 + row * 76 } }]));
   const results = readScrambleAtlas(digits, ["Suriel", "Anibal", "Duba", "Dominic", "Edward", "Said"]);
   assert.deepEqual(results.map(result => result.score), ["-7", "-8"]);
-  assert.deepEqual(results.map(result => result.holes), [{ 16: 0, 18: -1 }, { 16: -1, 18: -1 }]);
-  assert.ok(results.every(result => result.issue));
+  assert.deepEqual(results.map(result => result.holes), [{ 16: -1, 17: 0, 18: -1 }, { 16: -1, 17: -1, 18: -1 }]);
+  assert.ok(results.every(result => !result.issue));
   const withoutOut = digits.filter(word => word.bbox.x0 !== 20 + 9 * 92);
   assert.equal(readScrambleAtlas(withoutOut, ["Suriel", "Anibal", "Duba"])[0].score, "");
 });

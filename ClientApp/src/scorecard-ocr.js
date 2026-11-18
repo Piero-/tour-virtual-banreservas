@@ -127,7 +127,8 @@ export function matchScorecardTeam(names, teams, aliases = []) {
 
 const numericRow = line => line.match(/(?:^|[\s|:;,])([+-]?\d+)(?=$|[\s|:;,])/g)?.map(part => Number(part.trim().replace(/^[|:;,]/, ""))) || [];
 const starts = (line, labels) => new RegExp(`^(?:${labels})(?=\\s|:|\\||$)`, "i").exec(line);
-const holesList = [16, 17, 18];
+// Keys retain the existing tiebreak contract: 18 = last played, 16 = third-last.
+const closingScores = played => Object.fromEntries(played.slice(-3).map((delta, i, last) => [19 - last.length + i, delta]));
 const allowedDelta = delta => Number.isInteger(delta) && delta >= -3 && delta <= 2;
 
 // A simulator card can show several players sharing the same scramble score.
@@ -188,14 +189,10 @@ export function readSimulatorCard(words) {
     if (Math.abs(relative) > 99) continue;
     const key = JSON.stringify(played.map(hole => [hole, cells.get(slot(hole))]));
     if (!groups.has(key)) {
-      const finalHoles = {};
-      for (const hole of holesList) {
-        if (!played.includes(hole)) continue;
-        const delta = cells.get(slot(hole)) - pars.get(slot(hole));
-        if (allowedDelta(delta)) finalHoles[hole] = delta;
-      }
+      const finalHoles = Object.fromEntries(Object.entries(closingScores(
+        played.map(hole => cells.get(slot(hole)) - pars.get(slot(hole))))).filter(([, delta]) => allowedDelta(delta)));
       groups.set(key, { names: [], score: relative === 0 ? "E" : relative > 0 ? `+${relative}` : String(relative),
-        holes: finalHoles, issue: Object.keys(finalHoles).length < 3 ? "Revisa los hoyos 16, 17 y 18." : "" });
+        holes: finalHoles, issue: Object.keys(finalHoles).length < 3 ? "Revisa los últimos tres hoyos jugados." : "" });
     }
     const peers = names.filter(word => sameRow(word, person)).sort((a, b) => a.x - b.x);
     const name = peers.map(word => word.text).join(" ");
@@ -216,7 +213,7 @@ export function readScorecard(text) {
       continue;
     }
     const numbers = numericRow(line);
-    const ascending = numbers.length >= 3 && numbers.length <= 18 && numbers.every((n, i) => n >= 1 && n <= 18 && (!i || n === numbers[i - 1] + 1));
+    const ascending = numbers.length >= 3 && numbers.length <= 18 && numbers.every((n, i) => n >= 1 && n <= 18 && (!i || n > numbers[i - 1]));
     if (ascending && (starts(line, "hoyos?|holes?") || (columns == null && numbers.length >= 9 && /^\d/.test(line)))) { columns = numbers; continue; }
     if (starts(line, "par")) { pars = numbers; continue; }
     if (starts(line, "golpes|strokes|resultado por hoyo") || (starts(line, "score") && numbers.length >= 3)) { strokes = numbers; continue; }
@@ -242,12 +239,9 @@ export function readScorecard(text) {
   } else if (relative === undefined && gross !== undefined && indexed.length === 18 && pars?.length === 18 && pars.every(n => n >= 3 && n <= 6)) {
     relative = gross - sum(pars);
   }
-  const holes = {};
-  if (aligned) for (const hole of holesList) {
-    const index = indexed.indexOf(hole);
-    if (index >= 0 && allowedDelta(strokes[index] - pars[index])) holes[hole] = strokes[index] - pars[index];
-  }
+  const holes = aligned ? Object.fromEntries(Object.entries(closingScores(strokes.map((value, i) => value - pars[i])))
+    .filter(([, delta]) => allowedDelta(delta))) : {};
   const score = Number.isInteger(relative) && Math.abs(relative) <= 99 ? (relative === 0 ? "E" : relative > 0 ? `+${relative}` : String(relative)) : "";
   return { names, score, holes,
-    issue: !score ? "Falta el resultado final o la fila de par completa." : Object.keys(holes).length < 3 ? "Revisa los resultados de los hoyos 16, 17 y 18." : "" };
+    issue: !score ? "Falta el resultado final o la fila de par completa." : Object.keys(holes).length < 3 ? "Revisa los últimos tres hoyos jugados." : "" };
 }

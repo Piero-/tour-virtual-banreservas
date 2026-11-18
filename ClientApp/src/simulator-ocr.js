@@ -70,6 +70,9 @@ function rectangularGrid(points) {
 }
 
 const CELL_W = 92, CELL_H = 76, PAD = 20;
+export function lastPlayedScores(played) {
+  return Object.fromEntries(played.slice(-3).map(([, delta], index, last) => [19 - last.length + index, delta]));
+}
 export function simulatorAtlas(image, grid) {
   const width = PAD * 2 + CELL_W * 21, height = PAD * 2 + CELL_H * 7;
   const data = new Uint8ClampedArray(width * height * 4).fill(255);
@@ -203,23 +206,24 @@ export function readScrambleAtlas(digits, names) {
       if (row.get(20) !== gross || strokes.some(n => n !== undefined && !(n >= 1 && n <= 12)) ||
           strokes.reduce((sum, n) => sum + (n ?? 0), 0) !== gross) continue;
       const playedPar = strokes.reduce((sum, n, index) => sum + (n ? pars[index] : 0), 0);
-      const last = Object.fromEntries([15, 16, 17].filter(index => strokes[index]).map(index => [index + 1, strokes[index] - pars[index]]));
+      const last = lastPlayedScores(strokes.flatMap((value, index) => value ? [[index + 1, value - pars[index]]] : []));
       outcomes.set(JSON.stringify([playedPar, last]), { playedPar, last });
     }
     let attempts = 0;
-    const walk = (index, sum, playedPar, last) => {
+    const walk = (index, sum, playedPar, played) => {
       if (++attempts > 20000 || sum > gross || outcomes.size > 1) return;
       if (index === 18) {
+        const last = lastPlayedScores(played);
         if (sum === gross) outcomes.set(JSON.stringify([playedPar, last]), { playedPar, last });
         return;
       }
-      if (!choices[index].length) return walk(index + 1, sum, playedPar, last);
+      if (!choices[index].length) return walk(index + 1, sum, playedPar, played);
       for (const strokes of choices[index]) {
         const hole = index + 1;
-        walk(index + 1, sum + strokes, playedPar + pars[index], hole >= 16 ? { ...last, [hole]: strokes - pars[index] } : last);
+        walk(index + 1, sum + strokes, playedPar + pars[index], [...played, [hole, strokes - pars[index]]]);
       }
     };
-    if (gross && !outcomes.size) walk(0, 0, 0, {});
+    if (gross && !outcomes.size) walk(0, 0, 0, []);
     if (outcomes.size !== 1 || attempts > 20000) {
       results.push({ names: players, score: "", holes: {}, issue: "Los golpes leídos no se pudieron verificar con el total impreso." });
       continue;
@@ -228,7 +232,7 @@ export function readScrambleAtlas(digits, names) {
     const relative = gross - playedPar;
     const holes = Object.fromEntries(Object.entries(last).filter(([, delta]) => delta >= -3 && delta <= 2));
     results.push({ names: players, score: relative === 0 ? "E" : relative > 0 ? `+${relative}` : String(relative), holes,
-      issue: Object.keys(holes).length !== 3 ? "Revisa los hoyos 16, 17 y 18." : "" });
+      issue: Object.keys(holes).length !== 3 ? "Revisa los últimos tres hoyos jugados." : "" });
   }
   return results;
 }

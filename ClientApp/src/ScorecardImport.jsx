@@ -5,6 +5,7 @@ import { readScrambleAtlas, recognizeSimulatorDigits, recognizeSimulatorNames, s
 
 const holeOptions = [[2, "D. Bogey (+2)"], [1, "Bogey (+1)"], [0, "Par (E)"], [-1, "Birdie (-1)"], [-2, "Eagle (-2)"], [-3, "Albatross (-3)"]];
 const holes = [16, 17, 18];
+const holeLabels = { 16: "Antepenúltimo", 17: "Penúltimo", 18: "Último" };
 const accepted = /\.(jpe?g|png|webp|bmp)$/i;
 const acceptedMime = /^image\/(jpeg|png|webp|bmp|x-ms-bmp)$/i;
 
@@ -319,9 +320,9 @@ export default function ScorecardImport({ mobileCameraSlot }) {
         {!summary && entry.result.issue && <p className="scorecard-error">{entry.result.issue}</p>}
         {(duplicated || alreadySaved) && <p className="scorecard-error scorecard-duplicate-note"><strong>{team.name} ya está registrado.</strong>{duplicated ? " Hay otra tarjeta para este equipo." : " Subirlo reemplazará el score de esta semana."}</p>}
         {summary ? <dl className="scorecard-preview-values">
-          {holes.map(hole => <div key={hole}><dt>Hoyo {hole}</dt><dd>{holeOptions.find(([value]) => value === entry.holes[hole])?.[1]}</dd></div>)}
+          {holes.map(hole => <div key={hole}><dt>{holeLabels[hole]}</dt><dd>{holeOptions.find(([value]) => value === entry.holes[hole])?.[1]}</dd></div>)}
         </dl> : <>
-        <div className="scorecard-holes">{holes.map(hole => <label className="field" key={hole}>Hoyo {hole}<select value={entry.holes[hole] ?? ""} onChange={event => update(entry.id, { holes: { ...entry.holes, [hole]: event.target.value === "" ? undefined : Number(event.target.value) } })}>
+        <div className="scorecard-holes">{holes.map(hole => <label className="field" key={hole}>{holeLabels[hole]}<select value={entry.holes[hole] ?? ""} onChange={event => update(entry.id, { holes: { ...entry.holes, [hole]: event.target.value === "" ? undefined : Number(event.target.value) } })}>
           <option value="">Sin lectura</option>{holeOptions.map(([value, label]) => <option value={value} key={value}>{label}</option>)}
         </select></label>)}</div>
         {entry.raw && entry.result.issue && <details><summary>Texto OCR sin procesar</summary><pre>{entry.raw}</pre></details>}

@@ -72,7 +72,7 @@ export default function App() {
       const { downloadSeasonPdf } = await import("./season-pdf");
       return downloadSeasonPdf(archive);
     };
-    script.src = "/legacy-app.js?v=20261116-intelligence-page";
+    script.src = "/legacy-app.js?v=20261117-last-played-holes";
     script.async = false;
     document.body.appendChild(script);
   }, [ready, intelligencePage]);

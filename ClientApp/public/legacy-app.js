@@ -1263,7 +1263,7 @@ function createHoleScoreControl(week, teamId) {
   for (const hole of [18, 17, 16]) {
     const value = week.holeScores?.[teamId]?.[hole] || 0;
     const item = document.createElement("span");
-    item.append(`${hole} `);
+    item.append(`${{18: "Últ.", 17: "Pen.", 16: "Ant."}[hole]} `);
     const score = document.createElement("strong");
     score.textContent = value === 0 ? "E" : value > 0 ? `+${value}` : String(value);
     item.append(score);
@@ -1364,12 +1364,12 @@ function openHoleScores(week, teamId, trigger) {
   const wheels = [];
   for (const hole of [18, 17, 16]) {
     const label = document.createElement("h3");
-    label.textContent = `Hoyo ${hole}`;
+    label.textContent = {18: "Último hoyo jugado", 17: "Penúltimo hoyo jugado", 16: "Antepenúltimo hoyo jugado"}[hole];
     const wheel = document.createElement("div");
     wheel.className = "hole-score-wheel";
     wheel.tabIndex = 0;
     wheel.setAttribute("role", "listbox");
-    wheel.setAttribute("aria-label", `Hoyo ${hole}`);
+    wheel.setAttribute("aria-label", label.textContent);
     HOLE_OPTIONS.forEach((option, index) => {
       const item = document.createElement("div");
       item.id = `hole-${hole}-option-${index}`;
