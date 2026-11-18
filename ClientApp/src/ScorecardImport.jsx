@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { learnScorecardAliases, matchScorecardTeam, readScorecard, readSimulatorCard } from "./scorecard-ocr";
 import { focusScorecardImage, refineScorecardGrid, readScrambleAtlas, recognizeSimulatorDigits, recognizeSimulatorNames, simulatorAtlas, simulatorGrid } from "./simulator-ocr";
 import { bindPhotoImportEvents } from "./photo-import-events";
+import { validateVisionCard, visionPhoto } from "./scorecard-vision";
 
 const holeOptions = [...Array.from({ length: 7 }, (_, i) => [9 - i, `+${9 - i}`]), [2, "D. Bogey (+2)"], [1, "Bogey (+1)"], [0, "Par (E)"], [-1, "Birdie (-1)"], [-2, "Eagle (-2)"], [-3, "Albatross (-3)"]];
 const holes = [16, 17, 18];
@@ -143,10 +144,8 @@ export default function ScorecardImport({ mobileCameraSlot }) {
     try {
       const aliasesRequest = window.requestScorecardAliases(context)
         .then(response => response.ok ? response.json() : null).then(data => data?.aliases ?? []).catch(() => []);
-      const { createWorker } = await import("tesseract.js");
-      worker = await createWorker("eng");
-      await worker.setParameters({ preserve_interword_spaces: "1" });
       const aliases = await aliasesRequest;
+      let useVision = true;
       let index = 0;
       while (pending.current.length) {
         const file = pending.current.shift();
@@ -154,6 +153,41 @@ export default function ScorecardImport({ mobileCameraSlot }) {
         setProgress(0);
         const id = ++nextId.current;
         try {
+          if (useVision && window.requestScorecardVision) {
+            setStatus(`Analizando foto ${index + 1} con visi\u00f3n\u2026`);
+            setProgress(10);
+            const timer = setInterval(() => setProgress(value => Math.min(85, (value ?? 10) + 3)), 1500);
+            try {
+              const photo = await visionPhoto(file);
+              const response = await window.requestScorecardVision(photo, AbortSignal.timeout(100_000));
+              const payload = await response.json().catch(() => null);
+              if (response.ok) {
+                const cards = validateVisionCard(payload);
+                if (cards.some(card => card.score)) {
+                  setEntries(items => [...items, ...cards.map((result, groupIndex) => {
+                    const match = !result.issue ? matchScorecardTeam(result.names, context.teams, aliases) : null;
+                    return { id: ++nextId.current, file: `${file.name} \u00b7 Grupo ${groupIndex + 1}`, raw: JSON.stringify(payload),
+                      result, match, teamId: match?.team.id || "", score: result.score, holes: result.holes };
+                  })]);
+                  continue;
+                }
+                setError("Visi\u00f3n no pudo verificar los totales; se est\u00e1 intentando con OCR local.");
+              } else {
+                if ([401, 403].includes(response.status)) throw new Error("La sesi\u00f3n no est\u00e1 autorizada. Vuelve a iniciar sesi\u00f3n.");
+                useVision = false;
+                setError(payload?.error || "Visi\u00f3n no est\u00e1 disponible; se usar\u00e1 el OCR local.");
+              }
+            } catch (failure) {
+              useVision = false;
+              setError(failure?.message || "No se pudo conectar con visi\u00f3n; se usar\u00e1 el OCR local.");
+            } finally { clearInterval(timer); }
+          }
+          if (!worker) {
+            setStatus("Preparando OCR local\u2026");
+            const { createWorker } = await import("tesseract.js");
+            worker = await createWorker("eng");
+            await worker.setParameters({ preserve_interword_spaces: "1" });
+          }
           const ocrOptions = { blocks: true, text: true };
           let { data } = await worker.recognize(file, { tessedit_pageseg_mode: "11", tessedit_char_whitelist: "" }, ocrOptions);
           setProgress(20);

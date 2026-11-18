@@ -2912,6 +2912,10 @@ function scorecardSeason() {
   return `${state.registrationId || ""}:${archive?.id || ""}`;
 }
 
+window.requestScorecardVision = (photo, signal) => fetch(API_STATE_URL.replace(/\/state$/, "/scorecard-vision"), {
+  method: "POST", headers: { Authorization: `Bearer ${adminToken}`, "Content-Type": "image/jpeg" }, body: photo, signal,
+});
+
 window.requestScorecardAliases = (context, method = "GET", body) => {
   const query = new URLSearchParams({ category: context.category, season: context.season });
   return fetch(`${API_STATE_URL.replace(/\/state$/, "/scorecard-aliases")}?${query}`, {

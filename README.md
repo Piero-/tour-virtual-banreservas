@@ -93,6 +93,34 @@ VITE_API_BASE_URL=https://tu-backend-en-render.onrender.com
 
 ## API
 
+### Scorecard vision (optional)
+
+Configure only on the backend (Render Environment), never in Vercel or source control:
+
+```text
+OPENAI_API_KEY=your-secret-key
+OPENAI_VISION_MODEL=gpt-5.4-mini
+```
+
+The model variable is optional. The API key needs Responses write access.
+Photo imports send a JPEG (maximum edge 2000 pixels) to OpenAI through an
+authenticated backend endpoint. Images and upstream responses are not logged;
+requests use `store: false`. Standard provider data policies still apply.
+The client validates gross/OUT/IN/relative totals and calculates played-hole par
+and the last three played holes. It never applies a score without the existing
+import confirmation flow. When vision is unavailable, it falls back to local OCR
+and shows the reason. Requests are not automatically retried.
+The backend allows two simultaneous requests and 60 photos per user per hour
+per server instance (in-memory limit, resets on restart). Set provider project
+spending controls separately; this is not a dollar spending cap.
+
+Tests without paid API calls:
+
+```text
+node --test ClientApp/scorecard-vision.test.mjs ClientApp/scorecard-ocr.test.mjs ClientApp/photo-import-events.test.mjs
+dotnet run --project server/tests/ScorecardVision.Tests
+```
+
 - `GET /api/state`
 - `PUT /api/state`
 

@@ -20,6 +20,8 @@ if (!string.IsNullOrWhiteSpace(port))
 }
 
 var connectionString = ResolveConnectionString(builder.Configuration);
+builder.Services.AddHttpClient("scorecard-vision");
+builder.Services.AddSingleton<ScorecardVision>();
 
 builder.Services.AddDbContext<AppDbContext>(options =>
 {
@@ -130,6 +132,41 @@ app.MapGet("/api/scorecard-aliases", async (string category, string? season, Htt
     if (scope is null) return Results.Conflict();
     return Results.Ok(new { aliases = scope.Entries, revision = scope.Revision, season = scope.Season,
         teams = season is null ? scope.Teams : null });
+});
+
+app.MapPost("/api/scorecard-vision", async (HttpContext context, AppDbContext db, ScorecardVision vision) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var user = await UserAuth.Current(context, db);
+    if (user is null) return Results.Unauthorized();
+    if (!vision.Enabled) return Results.Json(new { error = "Visi\u00f3n no est\u00e1 configurada; se usar\u00e1 el OCR local." }, statusCode: 503);
+    const int maxBytes = 8 * 1024 * 1024;
+    if (context.Request.ContentType != "image/jpeg" || context.Request.ContentLength is not > 0 || context.Request.ContentLength > maxBytes)
+        return Results.BadRequest();
+    using var image = new MemoryStream();
+    var buffer = new byte[81920];
+    int count;
+    while ((count = await context.Request.Body.ReadAsync(buffer, context.RequestAborted)) > 0)
+    {
+        if (image.Length + count > maxBytes) return Results.StatusCode(413);
+        await image.WriteAsync(buffer.AsMemory(0, count), context.RequestAborted);
+    }
+    var bytes = image.ToArray();
+    if (bytes.Length < 4 || bytes[0] != 255 || bytes[1] != 216 || bytes[2] != 255) return Results.BadRequest();
+    if (!vision.Allow(user.Username)) return Results.Json(new { error = "L\u00edmite de 60 fotos por hora alcanzado; se usar\u00e1 el OCR local." }, statusCode: 429);
+    try { return Results.Ok(await vision.Read(bytes, context.RequestAborted)); }
+    catch (OperationCanceledException) { return Results.Json(new { error = "Visi\u00f3n tard\u00f3 demasiado; se usar\u00e1 el OCR local." }, statusCode: 504); }
+    catch (HttpRequestException exception)
+    {
+        var error = exception.StatusCode is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden
+            ? "Revisa la llave y los permisos de Responses en Render. Se usar\u00e1 el OCR local."
+            : exception.StatusCode == System.Net.HttpStatusCode.TooManyRequests
+                ? "OpenAI no tiene cuota disponible. Revisa cr\u00e9ditos y l\u00edmites. Se usar\u00e1 el OCR local."
+                : "OpenAI no pudo leer la foto; se usar\u00e1 el OCR local.";
+        return Results.Json(new { error }, statusCode: 502);
+    }
+    catch (Exception exception) when (exception is JsonException or InvalidDataException)
+    { return Results.Json(new { error = "La respuesta de visi\u00f3n no fue v\u00e1lida; se usar\u00e1 el OCR local." }, statusCode: 502); }
 });
 
 app.MapMethods("/api/scorecard-aliases", new[] { "POST", "PUT" },

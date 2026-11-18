@@ -72,7 +72,7 @@ export default function App() {
       const { downloadSeasonPdf } = await import("./season-pdf");
       return downloadSeasonPdf(archive);
     };
-    script.src = "/legacy-app.js?v=20261118-scorecard-perspective";
+    script.src = "/legacy-app.js?v=20261118-scorecard-vision";
     script.async = false;
     document.body.appendChild(script);
   }, [ready, intelligencePage]);
