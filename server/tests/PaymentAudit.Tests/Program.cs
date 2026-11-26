@@ -31,3 +31,26 @@ PaymentAudit.Record(db,State(1,1),State(0,1),"piero");db.SaveChanges();
 var removed = JsonNode.Parse(db.AppStates.OrderByDescending(r=>r.Id).First().Json)!;
 Check(removed["count"]!.GetValue<int>()==0 && removed["delta"]!.GetValue<int>()==-1);
 Console.WriteLine("Instant payment audit: additions, corrections, no duplicates, zero and category isolation passed.");
+static string DebtState(string name, decimal amount, int? week, bool include = true) => new JsonObject {
+    ["categories"]=new JsonObject { ["A"]=new JsonObject {
+        ["weekLimit"]=2, ["finance"]=new JsonObject { ["receivables"]=include ? new JsonArray(new JsonObject {
+            ["id"]="debt", ["name"]=name, ["amount"]=amount, ["paidWeek"]=week
+        }) : new JsonArray() }
+    } }
+}.ToJsonString();
+var pending=DebtState("Ana",500,null);var collected=DebtState("Ana",500,1);
+PaymentAudit.Record(db,DebtState("Ana",500,null,false),pending,"piero");db.SaveChanges();
+var registered=JsonNode.Parse(db.AppStates.OrderByDescending(r=>r.Id).First().Json)!;
+Check(registered["kind"]!.GetValue<string>()=="receivable");Check(registered["action"]!.GetValue<string>()=="Registró deuda");
+PaymentAudit.Record(db,pending,collected,"manuel");db.SaveChanges();
+var paid=JsonNode.Parse(db.AppStates.OrderByDescending(r=>r.Id).First().Json)!;
+Check(paid["action"]!.GetValue<string>()=="Marcó cobrada");
+var countBefore=db.AppStates.Count();PaymentAudit.Record(db,collected,collected,"piero");db.SaveChanges();Check(db.AppStates.Count()==countBefore);
+PaymentAudit.Record(db,collected,DebtState("Ana",600,1),"piero");db.SaveChanges();
+var edited=JsonNode.Parse(db.AppStates.OrderByDescending(r=>r.Id).First().Json)!;
+Check(edited["action"]!.GetValue<string>()=="Corrigió deuda");Check(edited["amount"]!.GetValue<decimal>()==600);
+PaymentAudit.Record(db,collected,pending,"piero");db.SaveChanges();
+Check(JsonNode.Parse(db.AppStates.OrderByDescending(r=>r.Id).First().Json)!["action"]!.GetValue<string>()=="Volvió a pendiente");
+PaymentAudit.Record(db,pending,DebtState("Ana",500,null,false),"piero");db.SaveChanges();
+Check(JsonNode.Parse(db.AppStates.OrderByDescending(r=>r.Id).First().Json)!["action"]!.GetValue<string>()=="Quitó deuda");
+Console.WriteLine("Receivable audit: creation, collection, corrections, undo, removal and unchanged saves passed.");

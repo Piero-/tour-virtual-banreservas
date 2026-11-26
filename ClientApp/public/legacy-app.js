@@ -186,6 +186,17 @@ function moneyCents(value) {
   return Number.isFinite(number) ? Math.round(Math.max(0, Math.min(number, 1000000000)) * 100) : 0;
 }
 
+function normalizeReceivables(saved) {
+  const records = new Map();
+  for (const entry of Array.isArray(saved) ? saved.slice(0, 500) : []) {
+    if (!entry || typeof entry.id !== "string" || !entry.id || entry.id.length > 80 ||
+      typeof entry.name !== "string" || !entry.name.trim() || moneyCents(entry.amount) <= 0) continue;
+    records.set(entry.id, { id: entry.id, name: entry.name.trim().slice(0, 80), amount: moneyCents(entry.amount) / 100,
+      paidWeek: Number.isInteger(entry.paidWeek) && entry.paidWeek >= 1 && entry.paidWeek <= MAX_WEEKS ? entry.paidWeek : null });
+  }
+  return [...records.values()];
+}
+
 function normalizeFinance(saved = {}) {
   const amounts = values => Object.fromEntries(Object.entries(values || {})
     .filter(([week]) => Number.isInteger(Number(week)) && Number(week) >= 1 && Number(week) <= MAX_WEEKS)
@@ -196,6 +207,7 @@ function normalizeFinance(saved = {}) {
     instantCounts: Object.fromEntries(Object.entries(saved?.instantCounts || {})
       .filter(([week, count]) => Number.isInteger(Number(week)) && Number(week) >= 1 && Number(week) <= MAX_WEEKS
         && Number.isInteger(count) && count >= 0 && count <= 10000)),
+    receivables: normalizeReceivables(saved?.receivables),
     conceptOrder: Array.isArray(saved?.conceptOrder) ? [...new Set(saved.conceptOrder.filter(value => typeof value === "string"))].slice(0, 30) : [] };
 }
 
@@ -213,6 +225,7 @@ function buildPaymentLedger(category) {
   const rows = category.weeks.slice(0, category.weekLimit).map((week, index) => {
     const number = index + 1;
     const income = moneyCents(countPaid(week.paidTeamIds) * (number === category.weekLimit ? category.finalWeekFee : REGULAR_WEEK_FEE_DOP));
+    const receivableIncome = finance.receivables.filter(entry => entry.paidWeek === number).reduce((sum, entry) => sum + moneyCents(entry.amount), 0);
     const legacyTransfer = Object.hasOwn(finance.transfers, number);
     const poolPaid = legacyTransfer || Object.hasOwn(finance.poolTransfers, number);
     const expensePaid = legacyTransfer || Object.hasOwn(finance.expenseTransfers, number);
@@ -227,13 +240,15 @@ function buildPaymentLedger(category) {
       : Math.round(poolTransfer * 0.002) + Math.round(expense * 0.002);
     const weeklyInstantCount = finance.instantCounts[number] || 0;
     const instant = moneyCents(weeklyInstantCount * 100);
-    balance += income - transfer - transferFee - instant;
+    balance += income + receivableIncome - transfer - transferFee - instant;
     reserve -= expense + transferFee + instant;
     totalInstant += instant; instantCount += weeklyInstantCount;
-    receipts += income; totalExpenses += expense; totalTransfers += transfer; totalFees += transferFee;
-    return { week: number, income, pool, plannedTransfer, expense, transfer, poolTransfer, transferFee, instant, instantCount: weeklyInstantCount, balance, reserve, poolPaid, expensePaid };
+    receipts += income + receivableIncome; totalExpenses += expense; totalTransfers += transfer; totalFees += transferFee;
+    return { week: number, income, receivableIncome, pool, plannedTransfer, expense, transfer, poolTransfer, transferFee, instant, instantCount: weeklyInstantCount, balance, reserve, poolPaid, expensePaid };
   });
-  return { count, inscription, reserveReceived, donation, receipts, totalExpenses, totalTransfers, totalFees, totalInstant, instantCount, balance, reserve, rows };
+  const pendingReceivables = finance.receivables.filter(entry => entry.paidWeek === null).reduce((sum, entry) => sum + moneyCents(entry.amount), 0);
+  const collectedReceivables = rows.reduce((sum, row) => sum + row.receivableIncome, 0);
+  return { count, inscription, reserveReceived, donation, receipts, totalExpenses, totalTransfers, totalFees, totalInstant, instantCount, balance, reserve, pendingReceivables, collectedReceivables, projectedBalance: balance + pendingReceivables, rows };
 }
 
 function normalizeHiddenWeeks(savedWeeks) {
@@ -426,7 +441,9 @@ async function refreshPaymentAudit() {
       const row = document.createElement("div");
       row.className = "payment-audit-entry";
       const description = document.createElement("span");
-      description.textContent = entry.kind === "instant"
+      description.textContent = entry.kind === "receivable"
+        ? `${entry.username} · ${entry.action} · ${entry.name} · $${Number(entry.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}`
+        : entry.kind === "instant"
         ? `${entry.username} ${entry.delta > 0 ? "registró" : "quitó"} ${Math.abs(entry.delta)} Pagos al Instante · ${entry.payment} · ${entry.count} en total ($${entry.count * 100})`
         : `${entry.username} ${entry.paid ? "marcó" : "desmarcó"} el pago · ${entry.teamName} · ${entry.payment}`;
       const time = document.createElement("time");
@@ -973,6 +990,7 @@ function seasonAlreadyArchived(category, archives, categoryId) {
     || Object.values(category.finance?.poolTransfers || {}).some(Boolean)
     || Object.values(category.finance?.expenseTransfers || {}).some(Boolean)
     || Object.values(category.finance?.instantCounts || {}).some(Boolean)
+    || (category.finance?.receivables || []).length > 0
     || category.inscriptionPaidTeamIds.length > 0 || category.weeks.some(week =>
     week.paidTeamIds.length || week.placements.some(Boolean) || Object.keys(week.scores || {}).length || Object.keys(week.holeScores || {}).length);
   return !hasActivity && JSON.stringify(category.teams) === JSON.stringify(latest.snapshot.teams);
@@ -1837,6 +1855,7 @@ function renderFinance() {
   state.finance = normalizeFinance(state.finance);
   document.querySelector("#weeklyExpenseInput").value = state.finance.weeklyExpense;
   const ledger = buildPaymentLedger(state);
+  renderReceivables(ledger);
   const money = cents => `DOP ${((cents || 0) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const balanceTotal = document.querySelector("#paymentBalanceTotal");
   const compactMoney = cents => {
@@ -1891,7 +1910,10 @@ function renderFinance() {
     ["Reserva recibida para gastos", ledger.reserveReceived, "DOP 3,000 por equipo, ya incluidos en inscripciones"],
     ["Pagos semanales recibidos", weeklyReceived, "Acumulado de todas las semanas", "", progress(weekDisplayName(activeWeek), activeReceived, weeklyGoal)],
     ["Aporte recibido a la final", ledger.donation, "Donaciones recibidas"],
-    ["Total recibido", ledger.receipts, "Inscripciones + pagos semanales + aporte", "subtotal"],
+    ["Cobros de deudas recibidos", ledger.collectedReceivables, "Ya incluidos en el efectivo de la cuenta"],
+    ["Pendiente por cobrar", ledger.pendingReceivables, "No incluido en el efectivo hasta marcarlo cobrado"],
+    ["Saldo previsto con cobros", ledger.projectedBalance, "Saldo actual + deudas pendientes; no es efectivo disponible"],
+    ["Total recibido", ledger.receipts, "Inscripciones + pagos semanales + aporte + deudas cobradas", "subtotal"],
     ["Transferencias realizadas", -ledger.totalTransfers, "Pool distribuido + gastos del tour"],
     ["Comisiones de salida · 0.2%", -ledger.totalFees, "Sobre cada transferencia completa; se cubren con la reserva para gastos"],
     ["Pagos al Instante", -ledger.totalInstant, `${ledger.instantCount} pagos × $100 · Sin comisión de 0.20%`],
@@ -1911,6 +1933,7 @@ function renderFinance() {
   table.innerHTML = `<caption>Movimientos semanales · saldo calculado con todas las inscripciones y aportes recibidos a la fecha</caption><thead><tr><th>Movimiento</th>${ledger.rows.map(item => `<th>${weekDisplayName(item.week)}</th>`).join("")}</tr></thead><tbody>`
     + row("Pool semanal recibido", amounts("income"))
     + row("Pool a distribuir", amounts("pool"))
+    + row("Deudas cobradas", amounts("receivableIncome"))
     + row("Restaurante / gasto del tour", ledger.rows.map(item => money(item.expensePaid ? item.expense : moneyCents(state.finance.weeklyExpense))))
     + row("Pool transferido", amounts("poolTransfer"))
     + row("Gasto transferido", amounts("expense"))
@@ -1921,6 +1944,99 @@ function renderFinance() {
     + row("Reserva restante (menos todas las comisiones)", ledger.rows.map(item => `<span class="${item.reserve < 0 ? "finance-negative" : ""}">${money(item.reserve)}</span>`))
     + "</tbody>";
 }
+
+function renderReceivables(ledger) {
+  const container = document.querySelector("#pendingDebtEntries");
+  const total = document.querySelector("#pendingDebtTotal");
+  if (total) total.textContent = `$${(ledger.pendingReceivables / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  if (!container || container.contains(document.activeElement) && document.activeElement.tagName === "INPUT") return;
+  container.replaceChildren();
+  if (!state.finance.receivables.length) {
+    const empty = document.createElement("p");
+    empty.className = "receivable-empty";
+    empty.textContent = "No hay deudas registradas.";
+    container.append(empty);
+  }
+  for (const debt of [...state.finance.receivables].sort((a,b) => Number(a.paidWeek !== null) - Number(b.paidWeek !== null))) {
+    const row = document.createElement("div");
+    row.className = `receivable-row${debt.paidWeek !== null ? " is-collected" : ""}`;
+    row.dataset.receivable = debt.id;
+    const name = document.createElement("input");
+    name.className = "receivable-name"; name.value = debt.name; name.maxLength = 80;
+    name.dataset.debtField = "name"; name.setAttribute("aria-label", `Nombre de la deuda de ${debt.name}`);
+    const amount = document.createElement("label");
+    amount.className = "finance-amount-input";
+    const currency = document.createElement("span"); currency.textContent = "$";
+    const input = document.createElement("input");
+    input.type = "number"; input.inputMode = "decimal"; input.min = ".01"; input.step = ".01";
+    input.max = "1000000000"; input.value = debt.amount; input.dataset.debtField = "amount";
+    input.setAttribute("aria-label", `Monto de ${debt.name}`);
+    amount.append(currency, input);
+    const paid = document.createElement("button");
+    paid.type = "button"; paid.className = "icon-button receivable-collected"; paid.dataset.debtAction = "collect";
+    paid.setAttribute("aria-pressed", String(debt.paidWeek !== null));
+    paid.setAttribute("aria-label", `${debt.paidWeek !== null ? "Volver a pendiente" : "Marcar cobrada"}: ${debt.name}`);
+    paid.title = debt.paidWeek !== null ? `Cobrada · Semana ${debt.paidWeek}` : "Marcar cobrada";
+    paid.textContent = "✓";
+    const remove = document.createElement("button");
+    remove.type = "button"; remove.className = "receivable-remove"; remove.dataset.debtAction = "remove";
+    remove.setAttribute("aria-label", `Quitar deuda de ${debt.name}`); remove.title = "Quitar deuda"; remove.textContent = "×";
+    row.append(name, amount, paid, remove);
+    container.append(row);
+  }
+}
+
+const debtForm = document.querySelector("#pendingDebtForm");
+document.querySelector("#addDebtButton")?.addEventListener("click", event => {
+  event.preventDefault(); event.stopPropagation();
+  if (!requireAdmin()) return;
+  document.querySelector("#pendingDebts").open = true;
+  debtForm.hidden = false; debtForm.dataset.category = appState.activeCategory;
+  document.querySelector("#pendingDebtName").focus();
+});
+document.querySelector("#cancelDebtButton")?.addEventListener("click", () => {
+  debtForm.reset(); debtForm.hidden = true;
+});
+debtForm?.addEventListener("submit", event => {
+  event.preventDefault();
+  if (!requireAdmin()) return;
+  if (debtForm.dataset.category !== appState.activeCategory) {
+    debtForm.hidden = true; debtForm.reset(); showToast("Cambió el tour. Vuelve a agregar la deuda.", "error"); return;
+  }
+  const name = document.querySelector("#pendingDebtName").value.trim().slice(0, 80);
+  const amount = moneyCents(document.querySelector("#pendingDebtAmount").value) / 100;
+  if (!name || amount <= 0) return;
+  state.finance = normalizeFinance(state.finance);
+  if (state.finance.receivables.length >= 500) { showToast("El límite es de 500 deudas.", "error"); return; }
+  state.finance.receivables.push({ id: crypto.randomUUID(), name, amount, paidWeek: null });
+  debtForm.reset(); debtForm.hidden = true;
+  renderFinance(); saveState(true);
+});
+document.querySelector("#pendingDebtEntries")?.addEventListener("change", event => {
+  if (!event.target.dataset.debtField || !requireAdmin()) return;
+  const id = event.target.closest("[data-receivable]")?.dataset.receivable;
+  state.finance = normalizeFinance(state.finance);
+  const debt = state.finance.receivables.find(entry => entry.id === id);
+  if (!debt) return;
+  const key = event.target.dataset.debtField;
+  const value = key === "name" ? event.target.value.trim().slice(0, 80) : moneyCents(event.target.value) / 100;
+  if (!value) { event.target.value = debt[key]; return; }
+  debt[key] = value;
+  renderFinance(); saveState(true);
+});
+document.querySelector("#pendingDebtEntries")?.addEventListener("click", event => {
+  const action = event.target.closest("[data-debt-action]");
+  if (!action || !requireAdmin()) return;
+  const id = action.closest("[data-receivable]")?.dataset.receivable;
+  state.finance = normalizeFinance(state.finance);
+  const debt = state.finance.receivables.find(entry => entry.id === id);
+  if (!debt) return;
+  if (action.dataset.debtAction === "remove") {
+    if (!confirm(`¿Quitar la deuda de ${debt.name}?${debt.paidWeek !== null ? " También se descontará este cobro del saldo." : ""}`)) return;
+    state.finance.receivables = state.finance.receivables.filter(entry => entry.id !== id);
+  } else debt.paidWeek = debt.paidWeek !== null ? null : activeWeek;
+  renderFinance(); saveState(true);
+});
 
 function setupConceptReorder(table) {
   const body = table.tBodies[0];

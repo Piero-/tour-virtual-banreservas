@@ -14,6 +14,24 @@ public static class PaymentAudit
         {
             if (value is not JsonObject current) continue;
             var old = before?[category];
+            var oldDebts = Receivables(old);
+            var newDebts = Receivables(current);
+            foreach (var id in oldDebts.Keys.Union(newDebts.Keys))
+            {
+                oldDebts.TryGetValue(id, out var prior);
+                newDebts.TryGetValue(id, out var debt);
+                if (prior is not null && debt is not null && JsonNode.DeepEquals(prior, debt)) continue;
+                var item = debt ?? prior!;
+                var action = prior is null ? "Registró deuda" : debt is null ? "Quitó deuda" :
+                    prior["paidWeek"] is null && debt["paidWeek"] is not null ? "Marcó cobrada" :
+                    prior["paidWeek"] is not null && debt["paidWeek"] is null ? "Volvió a pendiente" : "Corrigió deuda";
+                var entry = new JsonObject {
+                    ["kind"] = "receivable", ["username"] = username, ["category"] = category,
+                    ["name"] = item["name"]?.DeepClone(), ["amount"] = item["amount"]?.DeepClone(),
+                    ["action"] = action, ["receivableId"] = id, ["timestamp"] = DateTimeOffset.UtcNow.ToString("O")
+                };
+                db.AppStates.Add(new AppStateRecord { Key = "audit:" + Guid.NewGuid().ToString("N"), Json = entry.ToJsonString() });
+            }
             var instantWeeks = ((old?["finance"]?["instantCounts"] as JsonObject)?.Select(p => p.Key) ?? [])
                 .Union((current["finance"]?["instantCounts"] as JsonObject)?.Select(p => p.Key) ?? []);
             foreach (var week in instantWeeks)
@@ -59,6 +77,11 @@ public static class PaymentAudit
             }
         }
     }
+
+    private static Dictionary<string, JsonObject> Receivables(JsonNode? category) =>
+        (category?["finance"]?["receivables"] as JsonArray ?? [])
+            .OfType<JsonObject>().Take(500).Where(item => item["id"] is JsonValue value && value.TryGetValue<string>(out _))
+            .GroupBy(item => item["id"]!.GetValue<string>()).ToDictionary(group => group.Key, group => group.Last());
 
     private static int InstantCount(JsonNode? category, string week) =>
         category?["finance"]?["instantCounts"]?[week] is JsonValue value && value.TryGetValue<int>(out var count)

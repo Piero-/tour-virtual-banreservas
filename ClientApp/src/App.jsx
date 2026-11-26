@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import Roulette from "./Roulette";
 import ScorecardImport from "./ScorecardImport";
 import IntelligenceCenter from "./IntelligenceCenter";
+import { rememberDetails } from "./remember-details";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 const API_STATE_URL = `${API_BASE_URL}/api/state`;
@@ -19,6 +20,12 @@ export default function App() {
   });
   const paymentBalance = useRef(null);
   const booted = useRef(false);
+  useEffect(() => {
+    if (!ready || roulettePage || intelligencePage) return;
+    return rememberDetails(document.querySelectorAll("details[data-remember]"), {
+      getItem: key => localStorage.getItem(key), setItem: (key, value) => localStorage.setItem(key, value),
+    });
+  }, [ready, roulettePage, intelligencePage]);
 
   function setPaymentsCompact(collapsed) {
     if (collapsed && paymentBalance.current) paymentBalance.current.open = false;
@@ -72,7 +79,7 @@ export default function App() {
       const { downloadSeasonPdf } = await import("./season-pdf");
       return downloadSeasonPdf(archive);
     };
-    script.src = "/legacy-app.js?v=20261125-ocr-countback";
+    script.src = "/legacy-app.js?v=20261125-receivables";
     script.async = false;
     document.body.appendChild(script);
   }, [ready, intelligencePage]);
@@ -117,9 +124,13 @@ export default function App() {
               <span>Categoría</span>
               <select id="publicCategorySelect"><option value="A">A, B y C</option><option value="C">C</option></select>
             </label>
-            <button className="button secondary admin-only" type="button" aria-haspopup="dialog" onClick={() => document.getElementById("tourSettings").showModal()}>Configuración del tour</button>
+            <button className="button secondary admin-only" type="button" aria-haspopup="dialog" aria-controls="tourSettings" onClick={() => {
+              const dialog = document.getElementById("tourSettings");
+              dialog.showModal();
+              document.getElementById("tourSettingsTitle").focus({ preventScroll: true });
+            }}>Configuración del tour</button>
             <dialog id="tourSettings" className="hole-score-modal tour-settings" aria-labelledby="tourSettingsTitle">
-              <h2 id="tourSettingsTitle">Configuración del tour</h2>
+              <h2 id="tourSettingsTitle" tabIndex={-1} ref={node => node?.setAttribute("autofocus", "")}>Configuración del tour</h2>
               <div className="tour-settings-fields">
             <label className="field compact">
               <span>Categoría</span>
@@ -289,7 +300,7 @@ export default function App() {
           <div className="table-scroll payment-scroll">
             <table id="paymentTable" className="payment-table"></table>
           </div>
-          <details className="payment-finance" id="paymentFinance">
+          <details className="payment-finance" id="paymentFinance" data-remember="finance">
             <summary>Movimientos y balance</summary>
             <div className="finance-settings">
               <label className="field finance-field">
@@ -301,7 +312,20 @@ export default function App() {
                 <span className="finance-amount-input"><span>DOP</span><input id="finalDonationInput" type="number" inputMode="decimal" min="0" step="0.01" defaultValue="0" /></span>
               </label>
             </div>
-            <div className="table-scroll payment-scroll"><table id="financeTable" className="finance-table"></table></div>
+            <details className="finance-accordion" id="pendingDebts" data-remember="pending-debts">
+              <summary><span>Deudas pendientes</span><span id="pendingDebtTotal"></span><button id="addDebtButton" type="button" className="icon-button" aria-label="Agregar deuda pendiente" title="Agregar deuda pendiente">+</button></summary>
+              <form id="pendingDebtForm" className="receivable-form" hidden>
+                <label className="field">Nombre<input id="pendingDebtName" type="text" maxLength={80} required autoComplete="off" /></label>
+                <label className="field">Monto<span className="finance-amount-input"><span>$</span><input id="pendingDebtAmount" type="number" inputMode="decimal" min="0.01" step="0.01" max="1000000000" required /></span></label>
+                <button className="icon-button" type="submit" aria-label="Agregar" title="Agregar">+</button>
+                <button id="cancelDebtButton" className="receivable-remove" type="button" aria-label="Cancelar" title="Cancelar">×</button>
+              </form>
+              <div id="pendingDebtEntries" className="receivable-list"></div>
+            </details>
+            <details className="finance-accordion" id="financeMovements" data-remember="finance-movements" open>
+              <summary>Movimientos semanales</summary>
+              <div className="table-scroll payment-scroll"><table id="financeTable" className="finance-table"></table></div>
+            </details>
           </details>
           <details id="paymentAudit" className="payment-audit">
             <summary>Auditoría de pagos</summary>
