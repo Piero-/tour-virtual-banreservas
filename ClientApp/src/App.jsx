@@ -101,7 +101,7 @@ export default function App() {
       const { downloadSeasonPdf } = await import("./season-pdf");
       return downloadSeasonPdf(archive);
     };
-    script.src = "/legacy-app.js?v=20261125-cash-excludes-debts";
+    script.src = "/legacy-app.js?v=20261125-subtract-pending-debts";
     script.async = false;
     document.body.appendChild(script);
   }, [ready, intelligencePage]);

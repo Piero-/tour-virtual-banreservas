@@ -29,15 +29,18 @@ export async function createPaymentImage(data) {
   const font = getComputedStyle(document.querySelector("#paymentTable") || document.body).fontFamily;
   const rows = paymentImageRows(data).map(team => {
     ctx.font = `750 14px ${font}`;
-    const name = wrapImageText(ctx, team.name, teamWidth - 28);
+    const nameWidth = team.paymentName ? Math.min(128, Math.max(72, ctx.measureText(team.name).width)) : teamWidth - 24;
+    const name = wrapImageText(ctx, team.name, nameWidth);
+    const tagWidth = teamWidth - 34 - nameWidth;
     ctx.font = `400 12px ${font}`;
-    const associated = wrapImageText(ctx, team.paymentName, teamWidth - 44);
-    return { ...team, name, associated, height: Math.max(58, 22 + name.length * 20 + (associated.length ? associated.length * 17 + 8 : 0)) };
+    const associated = wrapImageText(ctx, team.paymentName, tagWidth - 16);
+    return { ...team, name, nameWidth, tagWidth, associated,
+      height: Math.max(42, 20 + Math.max(name.length * 18, associated.length ? associated.length * 17 + 4 : 0)) };
   });
   ctx.font = `800 11px ${font}`;
   const week = wrapImageText(ctx, String(data.weekLabel), columnWidth - 12);
   const headerHeight = Math.max(64, 30 + week.length * 15);
-  const tableTop = 88, height = Math.max(660, tableTop + headerHeight + rows.reduce((sum, row) => sum + row.height, 0) + margin);
+  const tableTop = 88, height = tableTop + headerHeight + rows.reduce((sum, row) => sum + row.height, 0) + margin;
   canvas.width = width * 2; canvas.height = height * 2;
   ctx.scale(2, 2);
   ctx.fillStyle = "#0b1f17"; ctx.fillRect(0, 0, width, height);
@@ -72,15 +75,16 @@ export async function createPaymentImage(data) {
   for (const row of rows) {
     ctx.fillStyle = "#101f19";ctx.fillRect(margin, y, tableWidth, row.height);
     ctx.textAlign = "left";ctx.fillStyle = "#f3ebd4";ctx.font = `750 14px ${font}`;
-    row.name.forEach((line, i) => ctx.fillText(line, margin + 12, y + 12 + i * 20));
+    row.name.forEach((line, i) => ctx.fillText(line, margin + 12, y + (row.height - row.name.length * 18) / 2 + i * 18));
     if (row.associated.length) {
-      const top = y + 16 + row.name.length * 20;
+      const top = y + (row.height - row.associated.length * 17 - 4) / 2;
+      const left = margin + 12 + row.nameWidth + 10;
       ctx.font = `400 12px ${font}`;
-      const pillWidth = Math.min(teamWidth - 28, Math.max(...row.associated.map(line => ctx.measureText(line).width)) + 16);
-      ctx.beginPath();ctx.roundRect(margin + 12, top, pillWidth, row.associated.length * 17 + 4, 7);
+      const pillWidth = Math.min(row.tagWidth, Math.max(...row.associated.map(line => ctx.measureText(line).width)) + 16);
+      ctx.beginPath();ctx.roundRect(left, top, pillWidth, row.associated.length * 17 + 4, 7);
       ctx.fillStyle = "#1d2d24";ctx.fill();ctx.strokeStyle = "#30463a";ctx.lineWidth = 1;ctx.stroke();
       ctx.fillStyle = "#b8c9be";
-      row.associated.forEach((line, i) => ctx.fillText(line, margin + 20, top + 3 + i * 17));
+      row.associated.forEach((line, i) => ctx.fillText(line, left + 8, top + 3 + i * 17));
     }
     checkbox(centers[0], y + row.height / 2, row.inscriptionPaid);
     checkbox(centers[1], y + row.height / 2, row.weekPaid);

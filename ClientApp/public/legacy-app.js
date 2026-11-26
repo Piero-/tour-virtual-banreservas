@@ -240,14 +240,18 @@ function buildPaymentLedger(category) {
       : Math.round(poolTransfer * 0.002) + Math.round(expense * 0.002);
     const weeklyInstantCount = finance.instantCounts[number] || 0;
     const instant = moneyCents(weeklyInstantCount * 100);
-    balance += income + receivableIncome - transfer - transferFee - instant;
+    balance += income - transfer - transferFee - instant;
     reserve -= expense + transferFee + instant;
     totalInstant += instant; instantCount += weeklyInstantCount;
-    receipts += income + receivableIncome; totalExpenses += expense; totalTransfers += transfer; totalFees += transferFee;
-    return { week: number, income, receivableIncome, pool, plannedTransfer, expense, transfer, poolTransfer, transferFee, instant, instantCount: weeklyInstantCount, balance, reserve, poolPaid, expensePaid };
+    receipts += income; totalExpenses += expense; totalTransfers += transfer; totalFees += transferFee;
+    const pendingAtWeek = finance.receivables.filter(entry => entry.paidWeek === null || entry.paidWeek > number).reduce((sum, entry) => sum + moneyCents(entry.amount), 0);
+    return { week: number, income, receivableIncome, pool, plannedTransfer, expense, transfer, poolTransfer, transferFee, instant, instantCount: weeklyInstantCount, balance: balance - pendingAtWeek, reserve, poolPaid, expensePaid };
   });
   const pendingReceivables = finance.receivables.filter(entry => entry.paidWeek === null).reduce((sum, entry) => sum + moneyCents(entry.amount), 0);
   const collectedReceivables = rows.reduce((sum, row) => sum + row.receivableIncome, 0);
+  // These debts are shortfalls in registered payments, not additional income.
+  balance -= pendingReceivables;
+  receipts -= pendingReceivables;
   return { count, inscription, reserveReceived, donation, receipts, totalExpenses, totalTransfers, totalFees, totalInstant, instantCount, balance, reserve, pendingReceivables, collectedReceivables, rows };
 }
 
@@ -1880,7 +1884,7 @@ function renderFinance() {
   if (balanceTotal) {
     balanceTotal.textContent = money(ledger.balance).replace("DOP ", "$");
     balanceTotal.classList.toggle("has-pending-debts", ledger.pendingReceivables > 0);
-    balanceTotal.title = `En cuenta: ${money(ledger.balance)} · Pendiente por cobrar (no incluido): ${money(ledger.pendingReceivables)}`;
+    balanceTotal.title = `Saldo antes de deudas: ${money(ledger.balance + ledger.pendingReceivables)} · Deudas descontadas: ${money(ledger.pendingReceivables)}`;
   }
   const weeklyReceived = ledger.rows.reduce((sum, item) => sum + item.income, 0);
   const activeFee = activeWeek === state.weekLimit ? state.finalWeekFee : REGULAR_WEEK_FEE_DOP;
@@ -1923,13 +1927,13 @@ function renderFinance() {
     ["Reserva recibida para gastos", ledger.reserveReceived, "DOP 3,000 por equipo, ya incluidos en inscripciones"],
     ["Pagos semanales recibidos", weeklyReceived, "Acumulado de todas las semanas", "", progress(weekDisplayName(activeWeek), activeReceived, weeklyGoal)],
     ["Aporte recibido a la final", ledger.donation, "Donaciones recibidas"],
-    ["Cobros de deudas recibidos", ledger.collectedReceivables, "Ya incluidos en el efectivo de la cuenta"],
+    ["Deudas saldadas", ledger.collectedReceivables, "Ya contempladas en los pagos registrados; no se suman otra vez"],
     ["Pendiente por cobrar", ledger.pendingReceivables, "No incluido en el efectivo hasta marcarlo cobrado"],
-    ["Total recibido", ledger.receipts, "Inscripciones + pagos semanales + aporte + deudas cobradas", "subtotal"],
+    ["Total recibido", ledger.receipts, "Inscripciones + pagos semanales + aporte − deudas pendientes", "subtotal"],
     ["Transferencias realizadas", -ledger.totalTransfers, "Pool distribuido + gastos del tour"],
     ["Comisiones de salida · 0.2%", -ledger.totalFees, "Sobre cada transferencia completa; se cubren con la reserva para gastos"],
     ["Pagos al Instante", -ledger.totalInstant, `${ledger.instantCount} pagos × $100 · Sin comisión de 0.20%`],
-    ["Saldo esperado en cuenta", ledger.balance, "Solo dinero recibido menos salidas; las deudas pendientes no están incluidas", ledger.pendingReceivables > 0 ? "balance has-pending-debts" : "balance", progress("Efectivo del total recibido", ledger.balance, ledger.receipts, false)],
+    ["Saldo esperado en cuenta", ledger.balance, "Ingresos registrados − salidas − deudas pendientes", ledger.pendingReceivables > 0 ? "balance has-pending-debts" : "balance", progress("Efectivo del total recibido", ledger.balance, ledger.receipts, false)],
     ["Gastos del tour pagados", ledger.totalExpenses, "Ya incluidos en las transferencias; no se restan otra vez"],
     ["Reserva restante para gastos", ledger.reserve, "Reserva recibida − gastos pagados − comisiones − pagos al Instante", "subtotal"],
     ["Aporte de inscripciones a la final", moneyCents(ledger.count * 10000), "DOP 10,000 por inscripción; incluido en lo recibido"],
@@ -1945,7 +1949,7 @@ function renderFinance() {
   table.innerHTML = `<caption>Movimientos semanales · saldo calculado con todas las inscripciones y aportes recibidos a la fecha</caption><thead><tr><th>Movimiento</th>${ledger.rows.map(item => `<th>${weekDisplayName(item.week)}</th>`).join("")}</tr></thead><tbody>`
     + row("Pool semanal recibido", amounts("income"))
     + row("Pool a distribuir", amounts("pool"))
-    + row("Deudas cobradas", amounts("receivableIncome"))
+    + row("Deudas saldadas (incluidas)", amounts("receivableIncome"))
     + row("Restaurante / gasto del tour", ledger.rows.map(item => money(item.expensePaid ? item.expense : moneyCents(state.finance.weeklyExpense))))
     + row("Pool transferido", amounts("poolTransfer"))
     + row("Gasto transferido", amounts("expense"))
