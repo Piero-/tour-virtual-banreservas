@@ -12,6 +12,7 @@ test("vision calculates score and last played holes instead of actual holes 16/1
   assert.equal(result.score, "-5");
   assert.deepEqual(result.holes, {16:0,17:-1,18:0});
   assert.equal(result.issue, "");
+  assert.deepEqual(result.played, strokes.flatMap((value,i)=>value===null?[]:[[i+1,value-par[i]]]));
 });
 test("vision rejects incompatible totals and malformed or illegible strokes", () => {
   for (const change of [{gross:44},{out:22},{in:23},{relative:-6},{strokes:[...strokes.slice(0,17)]},
@@ -28,6 +29,7 @@ test("vision retains partial groups, uncertainty and high stroke values without 
   assert.equal(result[1].score, "");
   assert.equal(read({...group,uncertain:true}).score, "-5");
   assert.ok(read({...group,uncertain:true}).issue);
+  assert.equal(read({...group,uncertain:true}).played,undefined);
   const high = [null,4,3,3,5,null,null,3,4,null,10,10,10,10,null,10,null,10];
   assert.deepEqual(read({...group,strokes:high,gross:82,out:22,in:60,relative:34}).holes,{16:7,17:5,18:6});
 });

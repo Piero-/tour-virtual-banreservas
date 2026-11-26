@@ -3268,6 +3268,8 @@ body {
 }
 .hole-score-summary span { white-space: nowrap; }
 .hole-score-summary strong { color: #e0e6df; font-weight: 700; }
+.hole-score-summary .hole-score-gap { opacity: .65; }
+.hole-score-summary .hole-score-decisive { padding-inline-start: 7px; border-inline-start: 1px solid currentColor; font-weight: 750; }
 .hole-score-modal {
   box-sizing: border-box;
   width: min(380px, calc(100vw - 32px));

@@ -192,7 +192,8 @@ export function readSimulatorCard(words) {
       const finalHoles = Object.fromEntries(Object.entries(closingScores(
         played.map(hole => cells.get(slot(hole)) - pars.get(slot(hole))))).filter(([, delta]) => allowedDelta(delta)));
       groups.set(key, { names: [], score: relative === 0 ? "E" : relative > 0 ? `+${relative}` : String(relative),
-        holes: finalHoles, issue: Object.keys(finalHoles).length < 3 ? "Revisa los últimos tres hoyos jugados." : "" });
+        holes: finalHoles, played: played.map(hole => [hole, cells.get(slot(hole)) - pars.get(slot(hole))]),
+        issue: Object.keys(finalHoles).length < 3 ? "Revisa los últimos tres hoyos jugados." : "" });
     }
     const peers = names.filter(word => sameRow(word, person)).sort((a, b) => a.x - b.x);
     const name = peers.map(word => word.text).join(" ");

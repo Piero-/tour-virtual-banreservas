@@ -144,6 +144,7 @@ function normalizeCategoryState(saved = {}) {
       }),
       scores: normalizeScores(savedWeek.scores),
       holeScores: normalizeHoleScores(savedWeek.holeScores),
+      ocrCards: normalizeOcrCards(savedWeek.ocrCards),
       scoreTiebreaks: normalizeScoreTiebreaks(savedWeek.scoreTiebreaks),
     };
   });
@@ -1275,9 +1276,23 @@ function createHoleScoreControl(week, teamId) {
     const item = document.createElement("span");
     item.append(`${hole} `);
     const score = document.createElement("strong");
-    score.textContent = value === 0 ? "E" : value > 0 ? `+${value}` : String(value);
+    score.textContent = `(${value === 0 ? "E" : value > 0 ? `+${value}` : String(value)})`;
     item.append(score);
     button.append(item);
+  }
+  const decisive = extendedCountbackTag(week, teamId);
+  if (decisive) {
+    const gap = document.createElement("span");
+    gap.className = "hole-score-gap";
+    gap.textContent = "…";
+    gap.setAttribute("aria-hidden", "true");
+    const tag = document.createElement("span");
+    tag.className = "hole-score-decisive";
+    const [hole, delta] = decisive;
+    tag.textContent = `${hole} (${delta === 0 ? "E" : delta > 0 ? `+${delta}` : delta})`;
+    tag.title = `Desempate OCR · hoyo real ${hole}`;
+    button.append(gap, tag);
+    button.setAttribute("aria-label", `Desempate de ${getTeam(teamId)?.name || "equipo"} · hoyo ${hole}`);
   }
   if (editable) button.addEventListener("click", event => {
     event.stopPropagation();
@@ -1464,6 +1479,7 @@ function createTiebreakControl(week, teamId) {
 function updateTeamGolfScore(week, teamId, rawScore, options = {}) {
   if (!requireAdmin()) return;
   const score = normalizeGolfScore(rawScore);
+  if (week.ocrCards) delete week.ocrCards[teamId];
   week.scores = week.scores || {};
   week.scoreTiebreaks = week.scoreTiebreaks || {};
   if (score) {
@@ -1529,10 +1545,56 @@ function pruneScoreTiebreaks(week) {
   });
 }
 
+function normalizeOcrCards(saved) {
+  return Object.fromEntries(Object.entries(saved || {}).flatMap(([id, card]) => {
+    const played = card?.played, score = normalizeGolfScore(card?.score);
+    if (!score || !Array.isArray(played) || played.length < 3 || played.length > 18 ||
+      played.some((pair, i) => !Array.isArray(pair) || pair.length !== 2 ||
+        !Number.isInteger(pair[0]) || pair[0] < 1 || pair[0] > 18 || i > 0 && pair[0] <= played[i - 1][0] ||
+        !Number.isInteger(pair[1]) || pair[1] < -3 || pair[1] > 9) ||
+      played.reduce((sum, pair) => sum + pair[1], 0) !== golfScoreSortValue(score)) return [];
+    return [[id, { score, played: played.map(pair => [...pair]) }]];
+  }));
+}
+
+function ocrCountbackGroup(week, teamId) {
+  const score = normalizeGolfScore(week.scores?.[teamId]);
+  if (!score) return [];
+  const ids = tiedTeamIdsForScore(week, score).filter(id => [18,17,16].every(hole =>
+    (week.holeScores?.[id]?.[hole] ?? 0) === (week.holeScores?.[teamId]?.[hole] ?? 0)));
+  if (ids.length < 2) return [];
+  const cards = normalizeOcrCards(week.ocrCards);
+  const pattern = JSON.stringify(cards[teamId]?.played.map(pair => pair[0]));
+  if (!cards[teamId] || ids.some(id => !cards[id] || cards[id].score !== score ||
+    JSON.stringify(cards[id].played.map(pair => pair[0])) !== pattern ||
+    cards[id].played.slice(-3).some((pair, i) => pair[1] !== (week.holeScores?.[id]?.[16 + i] ?? 0)))) return [];
+  return ids.map(id => ({ id, played: cards[id].played }));
+}
+
+function extendedCountbackTag(week, teamId) {
+  const group = ocrCountbackGroup(week, teamId);
+  const own = group.find(card => card.id === teamId);
+  if (!own) return null;
+  let decisive = own.played.length;
+  for (const other of group) {
+    if (other.id === teamId) continue;
+    for (let i = own.played.length - 4; i >= 0; i--) {
+      if (own.played[i][1] !== other.played[i][1]) { decisive = Math.min(decisive, i); break; }
+    }
+  }
+  return own.played[decisive] || null;
+}
+
 function compareLastHoles(week, firstId, secondId) {
   for (const hole of [18, 17, 16]) {
     const delta = (week.holeScores?.[firstId]?.[hole] ?? 0)
       - (week.holeScores?.[secondId]?.[hole] ?? 0);
+    if (delta) return delta;
+  }
+  const group = ocrCountbackGroup(week, firstId);
+  const first = group.find(card => card.id === firstId), second = group.find(card => card.id === secondId);
+  if (first && second) for (let i = first.played.length - 4; i >= 0; i--) {
+    const delta = first.played[i][1] - second.played[i][1];
     if (delta) return delta;
   }
   return 0;
@@ -1639,6 +1701,7 @@ function moveTeam(teamId, zoneType, placeIndex) {
 
   if (zoneType === "pool") {
     delete week.scores?.[teamId];
+    delete week.ocrCards?.[teamId];
     delete week.scoreTiebreaks?.[teamId];
     pruneScoreTiebreaks(week);
   }
@@ -3021,12 +3084,16 @@ window.applyScorecardImport = (context, entries, ignored = 0, aliases = []) => {
       throw new Error("Revisa que cada tarjeta tenga un equipo único, un score y tres hoyos válidos.");
     }
     ids.add(entry.teamId);
-    return { teamId: entry.teamId, score, holes: { 16: holes[0], 17: holes[1], 18: holes[2] } };
+    const card = normalizeOcrCards({ [entry.teamId]: { score, played: entry.played } })[entry.teamId];
+    return { teamId: entry.teamId, score, holes: { 16: holes[0], 17: holes[1], 18: holes[2] }, card };
   });
   const week = getWeek();
   for (const result of results) {
     (week.scores ||= {})[result.teamId] = result.score;
     (week.holeScores ||= {})[result.teamId] = result.holes;
+    week.ocrCards ||= {};
+    if (result.card) week.ocrCards[result.teamId] = result.card;
+    else delete week.ocrCards[result.teamId];
     if (week.scoreTiebreaks) delete week.scoreTiebreaks[result.teamId];
   }
   pruneScoreTiebreaks(week);
@@ -3055,6 +3122,7 @@ els.clearWeekButton.addEventListener("click", () => {
   getWeek().placements = Array(MAX_TEAMS).fill(null);
   getWeek().scores = {};
   getWeek().holeScores = {};
+  getWeek().ocrCards = {};
   getWeek().scoreTiebreaks = {};
   renderPool();
   renderPlacements();

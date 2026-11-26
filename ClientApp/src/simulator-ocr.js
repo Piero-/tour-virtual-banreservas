@@ -373,20 +373,25 @@ export function readScrambleAtlas(digits, names) {
     const gross = [...grossCounts].find(([, count]) => count >= 2)?.[0];
     const choices = columns.map(column => [...new Set(group.map(row => row.get(column)).filter(n => n >= 1 && n <= 12))]);
     const outcomes = new Map();
+    const record = (playedPar, played) => {
+      const last = lastPlayedScores(played);
+      const key = JSON.stringify([playedPar, last]);
+      const previous = outcomes.get(key);
+      outcomes.set(key, { playedPar, last,
+        played: previous && JSON.stringify(previous.played) !== JSON.stringify(played) ? null : played });
+    };
     for (const row of group) {
       const strokes = columns.map(column => row.get(column));
       if (row.get(20) !== gross || strokes.some(n => n !== undefined && !(n >= 1 && n <= 12)) ||
           strokes.reduce((sum, n) => sum + (n ?? 0), 0) !== gross) continue;
       const playedPar = strokes.reduce((sum, n, index) => sum + (n ? pars[index] : 0), 0);
-      const last = lastPlayedScores(strokes.flatMap((value, index) => value ? [[index + 1, value - pars[index]]] : []));
-      outcomes.set(JSON.stringify([playedPar, last]), { playedPar, last });
+      record(playedPar, strokes.flatMap((value, index) => value ? [[index + 1, value - pars[index]]] : []));
     }
     let attempts = 0;
     const walk = (index, sum, playedPar, played) => {
       if (++attempts > 20000 || sum > gross || outcomes.size > 1) return;
       if (index === 18) {
-        const last = lastPlayedScores(played);
-        if (sum === gross) outcomes.set(JSON.stringify([playedPar, last]), { playedPar, last });
+        if (sum === gross) record(playedPar, played);
         return;
       }
       if (!choices[index].length) return walk(index + 1, sum, playedPar, played);
@@ -400,10 +405,10 @@ export function readScrambleAtlas(digits, names) {
       results.push({ names: players, score: "", holes: {}, issue: "Los golpes leídos no se pudieron verificar con el total impreso." });
       continue;
     }
-    const { playedPar, last } = outcomes.values().next().value;
+    const { playedPar, last, played } = outcomes.values().next().value;
     const relative = gross - playedPar;
     const holes = Object.fromEntries(Object.entries(last).filter(([, delta]) => delta >= -3 && delta <= 9));
-    results.push({ names: players, score: relative === 0 ? "E" : relative > 0 ? `+${relative}` : String(relative), holes,
+    results.push({ names: players, score: relative === 0 ? "E" : relative > 0 ? `+${relative}` : String(relative), holes, played: played || undefined,
       issue: Object.keys(holes).length !== 3 ? "Revisa los últimos tres hoyos jugados." : "" });
   }
   return results;

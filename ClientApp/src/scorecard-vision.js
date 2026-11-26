@@ -26,6 +26,7 @@ export function validateVisionCard(payload) {
     const score = gross - par;
     const holes = lastPlayedScores(played);
     return { names, score: score === 0 ? "E" : score > 0 ? `+${score}` : String(score), holes,
+      played: group.uncertain === false ? played : undefined,
       issue: group.uncertain !== false ? "Revisa la lectura de esta tarjeta." :
         played.length < 3 ? "Revisa los \u00faltimos tres hoyos jugados." : "" };
   });

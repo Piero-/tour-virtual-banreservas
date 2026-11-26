@@ -45,7 +45,7 @@ test("Countback compares 18 then 17 then 16, with manual ranks only for identica
   const context = vm.createContext({
     getActiveTeams: () => teams, getActiveTeamIds: () => new Set(teams.map(t => t.id)), MAX_TEAMS: 12,
   });
-  for (const name of ["normalizeGolfScore", "golfScoreSortValue", "tiedTeamIdsForScore", "compareLastHoles", "unresolvedTiedTeamIds", "pruneScoreTiebreaks", "syncPlacementsFromScores"])
+  for (const name of ["normalizeGolfScore", "golfScoreSortValue", "tiedTeamIdsForScore", "normalizeOcrCards", "ocrCountbackGroup", "compareLastHoles", "unresolvedTiedTeamIds", "pruneScoreTiebreaks", "syncPlacementsFromScores"])
     vm.runInContext(functionSource(name), context);
   const week = {
     scores: { a: "-8", b: "-8", c: "-8", d: "-8" }, placements: ["d", "c", "b", "a"],

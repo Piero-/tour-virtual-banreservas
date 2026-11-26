@@ -309,7 +309,8 @@ export default function ScorecardImport({ mobileCameraSlot }) {
         else if (prior && prior.teamId !== alias.teamId) messagesByKey.set(alias.key, null);
       }
       const aliases = [...messagesByKey.values()].filter(Boolean);
-      const message = window.applyScorecardImport(context, batch.map(({ teamId, score, holes }) => ({ teamId, score, holes })), bulk ? entries.length - batch.length : 0, aliases);
+      const message = window.applyScorecardImport(context, batch.map(({ teamId, score, holes, result }) => ({ teamId, score, holes,
+        played: !result.issue && score === result.score && [16,17,18].every(hole => holes[hole] === result.holes[hole]) ? result.played : undefined })), bulk ? entries.length - batch.length : 0, aliases);
       const savedIds = new Set(batch.map(entry => entry.id));
       setEntries(items => items.filter(item => !savedIds.has(item.id)));
       setContext(previous => ({ ...previous, existing: [...new Set([...previous.existing, ...batch.map(entry => entry.teamId)])] }));
