@@ -30,6 +30,16 @@ function functionSource(name) {
   return (source.slice(start - 6, start) === "async " ? "async " : "") + source.slice(start, end);
 }
 
+test("Instant payments count as new season activity", () => {
+  const context = vm.createContext({});
+  vm.runInContext(functionSource("seasonAlreadyArchived"), context);
+  const category = { teams: [], inscriptionPaidTeamIds: [], weeks: [], finance: { instantCounts: {} } };
+  const archives = [{categoryId:"A",snapshot:{teams:[]}}];
+  assert.equal(context.seasonAlreadyArchived(category,archives,"A"),true);
+  category.finance.instantCounts[1]=1;
+  assert.equal(context.seasonAlreadyArchived(category,archives,"A"),false);
+});
+
 test("Countback compares 18 then 17 then 16, with manual ranks only for identical holes", () => {
   const teams = ["a", "b", "c", "d"].map(id => ({ id, name: id }));
   const context = vm.createContext({

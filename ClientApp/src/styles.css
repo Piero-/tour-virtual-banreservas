@@ -3461,12 +3461,21 @@ div.hole-score-summary { cursor: default; }
 .payment-balance-header:has(#weeklyTransferActions[hidden]) .payment-balance-wrap { margin-bottom: 0; }
 .weekly-transfer-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-bottom: 16px; }
 .weekly-transfer-actions .button { min-height: 40px; padding: 6px 10px; font-size: 12px; }
+.weekly-pool-actions { display: flex; align-items: stretch; gap: 8px; min-width: 0; }
+.weekly-pool-actions > .button { width: auto; min-width: 0; }
+.weekly-pool-actions > [data-transfer-kind="pool"] { flex: 1; }
+.weekly-transfer-actions .instant-payment-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; flex: 0 0 auto; min-height: 44px; touch-action: manipulation; user-select: none; -webkit-touch-callout: none; }
+.instant-payment-button [data-instant-count] { display: inline-grid; place-items: center; min-width: 22px; padding: 1px 4px; border-radius: 4px; background: #101f19; font-variant-numeric: tabular-nums; }
+.weekly-transfer-actions .instant-payment-button.is-active { border-color: #8bceab; color: #fff8e5; background: #006747; }
+.is-admin .weekly-transfer-actions .instant-payment-button.is-active:hover { background: #087956; border-color: #a8dfbe; }
+.instant-payment-audit-summary { margin: 10px 0; font-size: 12px; line-height: 1.5; color: #b8c9be; }
+@media (max-width: 700px) { .weekly-pool-actions { width: 100%; } }
 .weekly-transfer-actions .button[aria-pressed="true"] { background: #006747; color: #fff8e5; border-color: #8bceab; }
 .is-admin .weekly-transfer-actions .button[aria-pressed="true"]:hover { background: #087956; color: #fff8e5; border-color: #a8dfbe; }
 @media (min-width: 1100px) {
   .payment-balance-header { display: grid; }
   .payment-balance-header > * { grid-area: 1 / 1; min-width: 0; }
-  .payment-balance-header > details > summary { padding-inline-end: 285px; min-height: 40px; }
+  .payment-balance-header > details > summary { padding-inline-end: 410px; min-height: 44px; }
   .payment-balance-header:has(#weeklyTransferActions[hidden]) > details > summary { padding-inline-end: 2px; min-height: 0; }
   .payment-balance-header .weekly-transfer-actions { align-self: start; justify-self: end; z-index: 1; margin: 10px 0 0; }
 }
@@ -3694,6 +3703,12 @@ body::before {
 .payment-finance .finance-negative { color: #ffadad; }
 @media (max-width: 680px) {
   .finance-settings { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  #financeTable { width: max-content; min-width: 100%; font-size: 12px; }
+  #financeTable caption { position: sticky; left: 0; max-width: calc(100vw - 64px); padding: 10px 12px; font-size: 11px; line-height: 1.45; white-space: normal; }
+  #financeTable :is(th, td) { box-sizing: border-box; padding: 12px; vertical-align: middle; }
+  #financeTable tr > :first-child { width: 144px; min-width: 144px; max-width: 144px; white-space: normal; overflow-wrap: anywhere; line-height: 1.4; font-size: 10px; box-shadow: 1px 0 #385246; }
+  #financeTable tr > :not(:first-child) { min-width: 132px; }
+  #financeTable thead th { font-size: 10px; }
   #paymentSummary { max-width: 100%; }
   #paymentSummary tbody { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; padding: 8px 0; }
   :is(#paymentSummary, .concept-drag-preview) tr[data-concept] { padding: 7px 8px; border-radius: 6px; }

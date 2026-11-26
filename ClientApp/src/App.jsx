@@ -72,7 +72,7 @@ export default function App() {
       const { downloadSeasonPdf } = await import("./season-pdf");
       return downloadSeasonPdf(archive);
     };
-    script.src = "/legacy-app.js?v=20261118-scorecard-vision";
+    script.src = "/legacy-app.js?v=20261125-instant-payments";
     script.async = false;
     document.body.appendChild(script);
   }, [ready, intelligencePage]);
@@ -275,7 +275,10 @@ export default function App() {
             <table id="paymentSummary" className="payment-balance-table" aria-live="polite"></table>
           </details>
           <div id="weeklyTransferActions" className="weekly-transfer-actions" role="group" aria-label="Transferencias de la semana activa" hidden={paymentsCollapsed}>
-            <button type="button" className="button secondary" data-transfer-kind="pool" aria-pressed="false">Pool transferido</button>
+            <div className="weekly-pool-actions">
+              <button type="button" className="button secondary" data-transfer-kind="pool" aria-pressed="false">Pool transferido</button>
+              <button id="instantPaymentButton" type="button" className="button secondary instant-payment-button admin-only" title="$100 por pago. Mantén pulsado o usa flecha abajo para quitar uno.">Instante <span data-instant-count aria-live="polite">0</span></button>
+            </div>
             <button type="button" className="button secondary" data-transfer-kind="expense" aria-pressed="false">Gasto transferido</button>
           </div>
           </div>
@@ -302,6 +305,7 @@ export default function App() {
           </details>
           <details id="paymentAudit" className="payment-audit">
             <summary>Auditoría de pagos</summary>
+            <p id="instantPaymentAuditSummary" className="instant-payment-audit-summary" aria-live="polite"></p>
             <div id="paymentAuditEntries" aria-live="polite"></div>
           </details>
           </div>

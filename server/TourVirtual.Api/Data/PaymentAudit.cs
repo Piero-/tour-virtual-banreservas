@@ -14,6 +14,22 @@ public static class PaymentAudit
         {
             if (value is not JsonObject current) continue;
             var old = before?[category];
+            var instantWeeks = ((old?["finance"]?["instantCounts"] as JsonObject)?.Select(p => p.Key) ?? [])
+                .Union((current["finance"]?["instantCounts"] as JsonObject)?.Select(p => p.Key) ?? []);
+            foreach (var week in instantWeeks)
+            {
+                if (!int.TryParse(week, out var number) || number < 1 || number > 11) continue;
+                var from = InstantCount(old, week);
+                var to = InstantCount(current, week);
+                if (from == to) continue;
+                var entry = new JsonObject {
+                    ["kind"] = "instant", ["username"] = username, ["category"] = category,
+                    ["payment"] = number == current["weekLimit"]?.GetValue<int>() ? "GRAN FINAL" : $"Semana {number}",
+                    ["week"] = number, ["count"] = to, ["delta"] = to - from, ["amount"] = to * 100,
+                    ["timestamp"] = DateTimeOffset.UtcNow.ToString("O")
+                };
+                db.AppStates.Add(new AppStateRecord { Key = "audit:" + Guid.NewGuid().ToString("N"), Json = entry.ToJsonString() });
+            }
             Compare("inscriptionPaidTeamIds", old, current, "Inscripción");
             if (current["weeks"] is JsonArray weeks)
                 for (var i = 0; i < weeks.Count; i++)
@@ -43,6 +59,10 @@ public static class PaymentAudit
             }
         }
     }
+
+    private static int InstantCount(JsonNode? category, string week) =>
+        category?["finance"]?["instantCounts"]?[week] is JsonValue value && value.TryGetValue<int>(out var count)
+            && count >= 0 && count <= 10000 ? count : 0;
 
     private static HashSet<string> Ids(JsonNode? node) => node is JsonArray array
         ? array.Select(item => item?.GetValue<string>() ?? "").Where(id => id.Length > 0).ToHashSet()

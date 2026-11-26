@@ -192,6 +192,9 @@ function normalizeFinance(saved = {}) {
   return { weeklyExpense: moneyCents(saved?.weeklyExpense) / 100,
     expenses: amounts(saved?.expenses), transfers: amounts(saved?.transfers),
     poolTransfers: amounts(saved?.poolTransfers), expenseTransfers: amounts(saved?.expenseTransfers),
+    instantCounts: Object.fromEntries(Object.entries(saved?.instantCounts || {})
+      .filter(([week, count]) => Number.isInteger(Number(week)) && Number(week) >= 1 && Number(week) <= MAX_WEEKS
+        && Number.isInteger(count) && count >= 0 && count <= 10000)),
     conceptOrder: Array.isArray(saved?.conceptOrder) ? [...new Set(saved.conceptOrder.filter(value => typeof value === "string"))].slice(0, 30) : [] };
 }
 
@@ -205,7 +208,7 @@ function buildPaymentLedger(category) {
   const donation = moneyCents(category.finalDonation);
   let balance = inscription + reserveReceived + donation;
   let reserve = reserveReceived;
-  let receipts = balance, totalExpenses = 0, totalTransfers = 0, totalFees = 0;
+  let receipts = balance, totalExpenses = 0, totalTransfers = 0, totalFees = 0, totalInstant = 0, instantCount = 0;
   const rows = category.weeks.slice(0, category.weekLimit).map((week, index) => {
     const number = index + 1;
     const income = moneyCents(countPaid(week.paidTeamIds) * (number === category.weekLimit ? category.finalWeekFee : REGULAR_WEEK_FEE_DOP));
@@ -221,12 +224,15 @@ function buildPaymentLedger(category) {
     const transfer = legacyTransfer ? moneyCents(finance.transfers[number]) : poolTransfer + expense;
     const transferFee = legacyTransfer ? Math.round(transfer * 0.002)
       : Math.round(poolTransfer * 0.002) + Math.round(expense * 0.002);
-    balance += income - transfer - transferFee;
-    reserve -= expense + transferFee;
+    const weeklyInstantCount = finance.instantCounts[number] || 0;
+    const instant = moneyCents(weeklyInstantCount * 100);
+    balance += income - transfer - transferFee - instant;
+    reserve -= expense + transferFee + instant;
+    totalInstant += instant; instantCount += weeklyInstantCount;
     receipts += income; totalExpenses += expense; totalTransfers += transfer; totalFees += transferFee;
-    return { week: number, income, pool, plannedTransfer, expense, transfer, poolTransfer, transferFee, balance, reserve, poolPaid, expensePaid };
+    return { week: number, income, pool, plannedTransfer, expense, transfer, poolTransfer, transferFee, instant, instantCount: weeklyInstantCount, balance, reserve, poolPaid, expensePaid };
   });
-  return { count, inscription, reserveReceived, donation, receipts, totalExpenses, totalTransfers, totalFees, balance, reserve, rows };
+  return { count, inscription, reserveReceived, donation, receipts, totalExpenses, totalTransfers, totalFees, totalInstant, instantCount, balance, reserve, rows };
 }
 
 function normalizeHiddenWeeks(savedWeeks) {
@@ -419,7 +425,9 @@ async function refreshPaymentAudit() {
       const row = document.createElement("div");
       row.className = "payment-audit-entry";
       const description = document.createElement("span");
-      description.textContent = `${entry.username} ${entry.paid ? "marcó" : "desmarcó"} el pago · ${entry.teamName} · ${entry.payment}`;
+      description.textContent = entry.kind === "instant"
+        ? `${entry.username} ${entry.delta > 0 ? "registró" : "quitó"} ${Math.abs(entry.delta)} Pagos al Instante · ${entry.payment} · ${entry.count} en total ($${entry.count * 100})`
+        : `${entry.username} ${entry.paid ? "marcó" : "desmarcó"} el pago · ${entry.teamName} · ${entry.payment}`;
       const time = document.createElement("time");
       time.dateTime = entry.timestamp;
       time.textContent = new Date(entry.timestamp).toLocaleString("es-DO", { dateStyle: "medium", timeStyle: "medium" });
@@ -963,6 +971,7 @@ function seasonAlreadyArchived(category, archives, categoryId) {
     || Object.values(category.finance?.transfers || {}).some(Boolean)
     || Object.values(category.finance?.poolTransfers || {}).some(Boolean)
     || Object.values(category.finance?.expenseTransfers || {}).some(Boolean)
+    || Object.values(category.finance?.instantCounts || {}).some(Boolean)
     || category.inscriptionPaidTeamIds.length > 0 || category.weeks.some(week =>
     week.paidTeamIds.length || week.placements.some(Boolean) || Object.keys(week.scores || {}).length || Object.keys(week.holeScores || {}).length);
   return !hasActivity && JSON.stringify(category.teams) === JSON.stringify(latest.snapshot.teams);
@@ -1782,6 +1791,16 @@ function renderFinance() {
   const activeFee = activeWeek === state.weekLimit ? state.finalWeekFee : REGULAR_WEEK_FEE_DOP;
   const activeReceived = ledger.rows[activeWeek - 1]?.income ?? 0;
   const activeRow = ledger.rows[activeWeek - 1];
+  const instantButton = document.querySelector("#instantPaymentButton");
+  if (instantButton) {
+    const count = activeRow?.instantCount || 0;
+    instantButton.querySelector("[data-instant-count]").textContent = count;
+    instantButton.classList.toggle("is-active", count > 0);
+    instantButton.setAttribute("aria-label", `Pagos al Instante: ${count} · ${weekDisplayName(activeWeek)}. Añadir $100; mantener pulsado o flecha abajo para quitar uno.`);
+    instantButton.disabled = !isAdminMode() || !activeRow;
+  }
+  const instantSummary = document.querySelector("#instantPaymentAuditSummary");
+  if (instantSummary) instantSummary.textContent = `Pagos al Instante: ${ledger.instantCount} · $${(ledger.totalInstant / 100).toLocaleString("en-US")} · Sin comisión de 0.20%`;
   for (const button of document.querySelectorAll("[data-transfer-kind]")) {
     const pool = button.dataset.transferKind === "pool";
     const paid = pool ? activeRow?.poolPaid : activeRow?.expensePaid;
@@ -1812,9 +1831,10 @@ function renderFinance() {
     ["Total recibido", ledger.receipts, "Inscripciones + pagos semanales + aporte", "subtotal"],
     ["Transferencias realizadas", -ledger.totalTransfers, "Pool distribuido + gastos del tour"],
     ["Comisiones de salida · 0.2%", -ledger.totalFees, "Sobre cada transferencia completa; se cubren con la reserva para gastos"],
-    ["Saldo esperado en cuenta", ledger.balance, "Total recibido − transferencias − comisiones", "balance", progress("Saldo del total recibido", ledger.balance, ledger.receipts, false)],
+    ["Pagos al Instante", -ledger.totalInstant, `${ledger.instantCount} pagos × $100 · Sin comisión de 0.20%`],
+    ["Saldo esperado en cuenta", ledger.balance, "Total recibido − transferencias − comisiones − pagos al Instante", "balance", progress("Saldo del total recibido", ledger.balance, ledger.receipts, false)],
     ["Gastos del tour pagados", ledger.totalExpenses, "Ya incluidos en las transferencias; no se restan otra vez"],
-    ["Reserva restante para gastos", ledger.reserve, "Reserva recibida − gastos pagados − todas las comisiones", "subtotal"],
+    ["Reserva restante para gastos", ledger.reserve, "Reserva recibida − gastos pagados − comisiones − pagos al Instante", "subtotal"],
     ["Aporte de inscripciones a la final", moneyCents(ledger.count * 10000), "DOP 10,000 por inscripción; incluido en lo recibido"],
     ["Pagos a Hoyo 20", moneyCents(ledger.count * 5000), `${ledger.count} inscripciones × DOP 5,000; monto destinado, no salida confirmada`],
   ];
@@ -1833,6 +1853,7 @@ function renderFinance() {
     + row("Gasto transferido", amounts("expense"))
     + row("Total transferido", amounts("transfer"))
     + row("Comisión de transferencias · 0.2%", amounts("transferFee"))
+    + row("Pagos al Instante · $100", ledger.rows.map(item => `${item.instantCount} · ${money(item.instant)}`))
     + row("Saldo esperado en cuenta", ledger.rows.map(item => `<strong class="${item.balance < 0 ? "finance-negative" : ""}">${money(item.balance)}</strong>`), "finance-total")
     + row("Reserva restante (menos todas las comisiones)", ledger.rows.map(item => `<span class="${item.reserve < 0 ? "finance-negative" : ""}">${money(item.reserve)}</span>`))
     + "</tbody>";
@@ -1916,6 +1937,56 @@ document.querySelector("#weeklyExpenseInput")?.addEventListener("change", event 
   state.finance.weeklyExpense = moneyCents(event.target.value) / 100;
   renderFinance(); saveState(true);
 });
+function bindInstantPaymentButton(button, getScope, change) {
+  if (!button) return;
+  let timer, suppressClick = false, pointer;
+  const cancelTimer = () => { clearTimeout(timer); timer = undefined; };
+  button.addEventListener("pointerdown", event => {
+    if (!event.isPrimary || event.button !== 0 || button.disabled) return;
+    cancelTimer();
+    suppressClick = false;
+    pointer = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    const scope = getScope();
+    button.setPointerCapture?.(event.pointerId);
+    timer = setTimeout(() => {
+      suppressClick = true;
+      change(-1, scope);
+    }, 600);
+  });
+  button.addEventListener("pointermove", event => {
+    if (pointer?.id === event.pointerId && Math.hypot(event.clientX - pointer.x, event.clientY - pointer.y) > 12) {
+      cancelTimer();
+      suppressClick = true;
+    }
+  });
+  for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) button.addEventListener(type, () => {
+    cancelTimer();
+    pointer = undefined;
+  });
+  button.addEventListener("contextmenu", event => event.preventDefault());
+  button.addEventListener("keydown", event => {
+    if (event.key === "Enter" || event.key === " ") suppressClick = false;
+    if (event.key === "ArrowDown" && !event.repeat) { event.preventDefault(); change(-1, getScope()); }
+  });
+  button.addEventListener("click", () => {
+    if (suppressClick) { suppressClick = false; return; }
+    change(1, getScope());
+  });
+}
+
+bindInstantPaymentButton(document.querySelector("#instantPaymentButton"),
+  () => ({ category: state, week: activeWeek }),
+  (delta, scope) => {
+    if (scope.category !== state || scope.week !== activeWeek || !requireAdmin()) return;
+    state.finance = normalizeFinance(state.finance);
+    const count = state.finance.instantCounts[activeWeek] || 0;
+    const next = clamp(count + delta, 0, 10000);
+    if (next === count) return;
+    if (next) state.finance.instantCounts[activeWeek] = next;
+    else delete state.finance.instantCounts[activeWeek];
+    renderFinance(); saveState(true);
+  });
+
 document.querySelector("#weeklyTransferActions")?.addEventListener("click", event => {
   const button = event.target.closest("[data-transfer-kind]");
   if (!button || !requireAdmin()) return;

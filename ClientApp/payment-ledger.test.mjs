@@ -73,3 +73,62 @@ test('Legacy data, duplicate or inactive payments and negative balances', () => 
   assert.ok(context.buildPaymentLedger(restored).balance < 0);
   assert.ok(context.buildPaymentLedger(restored).reserve < 0);
 });
+
+test('Instant payments deduct exactly 100 pesos each without percentage fees', () => {
+  const state = category();
+  state.finance.instantCounts = {1:2,2:1};
+  let ledger = context.buildPaymentLedger(JSON.parse(JSON.stringify(state)));
+  assert.equal(ledger.instantCount, 3);
+  assert.equal(ledger.totalInstant, 30000);
+  assert.equal(ledger.balance, 2370000);
+  assert.equal(ledger.reserve, 270000);
+  assert.equal(ledger.totalFees, 0);
+  assert.equal(ledger.totalTransfers, 0);
+  assert.equal(ledger.rows[0].balance, 2380000);
+  assert.equal(ledger.rows[1].instantCount, 1);
+  state.finance.instantCounts[1] = 1;
+  ledger = context.buildPaymentLedger(state);
+  assert.equal(ledger.balance, 2380000);
+  assert.equal(ledger.instantCount, 2);
+  assert.equal(context.buildPaymentLedger(category()).instantCount, 0);
+});
+
+test('Instant payments preserve transfer commissions and normalize invalid counts', () => {
+  const state = category();
+  state.finance.poolTransfers = {1:6000};
+  state.finance.instantCounts = {1:2,2:0,3:100,0:4,12:3,bad:5,4:-1,5:1.5,6:'2'};
+  const ledger = context.buildPaymentLedger(state);
+  assert.equal(ledger.totalFees, 1200);
+  assert.equal(ledger.balance, 1778800);
+  assert.equal(ledger.instantCount, 2);
+  const normalized = context.normalizeFinance(state.finance).instantCounts;
+  assert.deepEqual(JSON.parse(JSON.stringify(normalized)), {1:2,2:0,3:100});
+});
+
+test('Instant button tap increments; hold decrements once without a second click', () => {
+  const handlers = {};
+  let timer, scope = {week:1}, count = 2;
+  const testContext = vm.createContext({setTimeout: fn => {timer=fn;return 1;},clearTimeout:()=>{timer=null;},Math});
+  const start = source.indexOf('function bindInstantPaymentButton(');
+  vm.runInContext(source.slice(start,source.indexOf('\n}',start)+2),testContext);
+  const button = {addEventListener:(name, fn)=>{handlers[name]=fn;},setPointerCapture:()=>{}};
+  testContext.bindInstantPaymentButton(button,()=>scope,(delta, captured)=>{if(captured===scope)count=Math.max(0,count+delta);});
+  const down = {isPrimary:true,button:0,pointerId:1,clientX:0,clientY:0};
+  handlers.pointerdown(down);handlers.pointerup({});handlers.click();
+  assert.equal(count,3);
+  handlers.pointerdown(down);timer();handlers.pointerup({});handlers.click();
+  assert.equal(count,2);
+  handlers.pointerdown(down);handlers.pointercancel({});
+  assert.equal(timer,null);
+  handlers.pointerdown(down);handlers.pointermove({...down,clientY:20});
+  assert.equal(timer,null);handlers.click();assert.equal(count,2);
+  handlers.pointerdown(down);scope={week:2};timer();handlers.pointerup({});handlers.click();
+  assert.equal(count,2);
+  handlers.keydown({key:'ArrowDown',preventDefault:()=>{}});
+  assert.equal(count,1);
+  handlers.keydown({key:'Enter'});handlers.click();assert.equal(count,2);
+});
+
+test('Both legacy entry points stay synchronized', () => {
+  assert.equal(source, readFileSync(new URL('./public/legacy-app.js',import.meta.url),'utf8'));
+});
