@@ -20,6 +20,28 @@ export default function App() {
   });
   const paymentBalance = useRef(null);
   const booted = useRef(false);
+  const [copyingPayments, setCopyingPayments] = useState(false);
+  function copyPaymentsImage() {
+    const data = window.getPaymentImageData?.();
+    if (!data || copyingPayments) return;
+    if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
+      window.notifyPaymentImage?.("El navegador no permite copiar imágenes. Abre la página por HTTPS y revisa el permiso del portapapeles.", true);
+      return;
+    }
+    setCopyingPayments(true);
+    // Pass the image promise immediately so Safari keeps the click permission.
+    const image = import("./payment-image").then(module => module.createPaymentImage(data));
+    image.catch(() => {});
+    try {
+      navigator.clipboard.write([new ClipboardItem({ "image/png": image })])
+        .then(() => window.notifyPaymentImage?.("Imagen de pagos copiada"))
+        .catch(() => window.notifyPaymentImage?.("No se pudo copiar la imagen. Revisa el permiso del portapapeles.", true))
+        .finally(() => setCopyingPayments(false));
+    } catch {
+      setCopyingPayments(false);
+      window.notifyPaymentImage?.("Este navegador no admite copiar la imagen.", true);
+    }
+  }
   useEffect(() => {
     if (!ready || roulettePage || intelligencePage) return;
     return rememberDetails(document.querySelectorAll("details[data-remember]"), {
@@ -79,7 +101,7 @@ export default function App() {
       const { downloadSeasonPdf } = await import("./season-pdf");
       return downloadSeasonPdf(archive);
     };
-    script.src = "/legacy-app.js?v=20261125-debt-expected-balance";
+    script.src = "/legacy-app.js?v=20261125-cash-excludes-debts";
     script.async = false;
     document.body.appendChild(script);
   }, [ready, intelligencePage]);
@@ -295,6 +317,7 @@ export default function App() {
           </div>
           <div id="paymentsContent" hidden={paymentsCollapsed}>
           <div className="payments-heading-actions">
+            <button id="copyPaymentsImageButton" className="button secondary admin-only" type="button" disabled={copyingPayments} onClick={copyPaymentsImage}>{copyingPayments ? "Copiando…" : "Copiar imagen"}</button>
             <button id="showWeeksButton" className="button secondary admin-only" type="button">Mostrar semanas</button>
           </div>
           <div className="table-scroll payment-scroll">

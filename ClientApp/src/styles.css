@@ -3479,7 +3479,7 @@ div.hole-score-summary { cursor: default; }
 .finance-amount-input input::-webkit-inner-spin-button,
 .finance-amount-input input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .payment-balance-wrap { margin: 0 0 16px; border-block: 1px solid #385246; }
-.payments-heading-actions { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+.payments-heading-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-bottom: 8px; }
 .payments-panel .payments-heading-actions .button { width: auto; min-height: 40px; padding: 7px 10px; font-size: 12px; }
 .payments-panel .payments-heading h2 { width: 100%; margin: 0; }
 .payments-collapse-button { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 12px; row-gap: 4px; width: 100%; min-height: 44px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: start; cursor: pointer; }

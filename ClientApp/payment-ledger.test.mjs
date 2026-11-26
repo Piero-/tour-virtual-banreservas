@@ -133,13 +133,13 @@ test('Both legacy entry points stay synchronized', () => {
   assert.equal(source, readFileSync(new URL('./public/legacy-app.js',import.meta.url),'utf8'));
 });
 
-test('Pending receivables affect the forecast, never actual cash or the pool', () => {
+test('Pending debts never inflate the account balance, receipts or the pool', () => {
   const state=category();
   state.finance.receivables=[{id:'debt',name:'Luis',amount:500,paidWeek:null}];
   const ledger=context.buildPaymentLedger(state);
   assert.equal(ledger.balance,2400000);
   assert.equal(ledger.pendingReceivables,50000);
-  assert.equal(ledger.projectedBalance,2450000);
+  assert.equal(ledger.projectedBalance,undefined);
   assert.equal(ledger.receipts,2400000);
   assert.equal(ledger.rows[0].pool,600000);
   assert.equal(ledger.totalFees,0);
@@ -150,7 +150,7 @@ test('Collecting, correcting and undoing receivables updates cash once in the se
   let ledger=context.buildPaymentLedger(JSON.parse(JSON.stringify(state)));
   assert.equal(ledger.rows[0].balance,2400000);
   assert.equal(ledger.rows[1].balance,2450000);
-  assert.equal(ledger.projectedBalance,2450000);
+  assert.equal(ledger.balance,2450000);
   assert.equal(ledger.receipts,2450000);assert.equal(ledger.collectedReceivables,50000);
   assert.equal(ledger.pendingReceivables,0);assert.equal(ledger.reserve,300000);
   assert.equal(ledger.totalFees,0);assert.equal(ledger.rows[1].pool,1000000);
@@ -158,8 +158,8 @@ test('Collecting, correcting and undoing receivables updates cash once in the se
   assert.equal(context.buildPaymentLedger(state).balance,2460000);
   state.finance.receivables[0].paidWeek=null;
   ledger=context.buildPaymentLedger(state);assert.equal(ledger.balance,2400000);assert.equal(ledger.pendingReceivables,60000);
-  assert.equal(ledger.projectedBalance,2460000);
-  state.finance.receivables=[];assert.equal(context.buildPaymentLedger(state).projectedBalance,2400000);
+  assert.equal(ledger.balance,2400000);
+  state.finance.receivables=[];assert.equal(context.buildPaymentLedger(state).balance,2400000);
   assert.equal(context.buildPaymentLedger(category()).pendingReceivables,0);
 });
 test('Receivable normalization rejects invalid rows and duplicates while retaining cents', () => {
