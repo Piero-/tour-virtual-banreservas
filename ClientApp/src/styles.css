@@ -3731,6 +3731,9 @@ body::before {
 .finance-paid input { width: 18px; height: 18px; accent-color: #00875c; }
 .finance-total { background: #123b2a; }
 .payment-finance .finance-negative { color: #ffadad; }
+#paymentBalanceTotal.has-pending-debts,
+.payment-balance-table .balance-balance.has-pending-debts .balance-amount,
+#financeTable .has-pending-debts { color: #ff8f8f; }
 @media (max-width: 680px) {
   .finance-settings { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
   #financeTable { width: max-content; min-width: 100%; font-size: 12px; }

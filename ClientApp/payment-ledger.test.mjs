@@ -150,6 +150,7 @@ test('Collecting, correcting and undoing receivables updates cash once in the se
   let ledger=context.buildPaymentLedger(JSON.parse(JSON.stringify(state)));
   assert.equal(ledger.rows[0].balance,2400000);
   assert.equal(ledger.rows[1].balance,2450000);
+  assert.equal(ledger.projectedBalance,2450000);
   assert.equal(ledger.receipts,2450000);assert.equal(ledger.collectedReceivables,50000);
   assert.equal(ledger.pendingReceivables,0);assert.equal(ledger.reserve,300000);
   assert.equal(ledger.totalFees,0);assert.equal(ledger.rows[1].pool,1000000);
@@ -157,6 +158,7 @@ test('Collecting, correcting and undoing receivables updates cash once in the se
   assert.equal(context.buildPaymentLedger(state).balance,2460000);
   state.finance.receivables[0].paidWeek=null;
   ledger=context.buildPaymentLedger(state);assert.equal(ledger.balance,2400000);assert.equal(ledger.pendingReceivables,60000);
+  assert.equal(ledger.projectedBalance,2460000);
   state.finance.receivables=[];assert.equal(context.buildPaymentLedger(state).projectedBalance,2400000);
   assert.equal(context.buildPaymentLedger(category()).pendingReceivables,0);
 });

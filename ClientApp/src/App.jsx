@@ -79,7 +79,7 @@ export default function App() {
       const { downloadSeasonPdf } = await import("./season-pdf");
       return downloadSeasonPdf(archive);
     };
-    script.src = "/legacy-app.js?v=20261125-receivables";
+    script.src = "/legacy-app.js?v=20261125-debt-expected-balance";
     script.async = false;
     document.body.appendChild(script);
   }, [ready, intelligencePage]);
